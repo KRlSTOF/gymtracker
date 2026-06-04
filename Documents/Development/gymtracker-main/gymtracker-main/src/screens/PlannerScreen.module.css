@@ -1,0 +1,193 @@
+.viewport {
+  display: flex;
+  flex-direction: column;
+  padding: 24px 16px 40px;
+  min-height: 100%;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.header p {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.actions {
+  margin-bottom: 24px;
+}
+
+.importBtn {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.importBtn:active {
+  opacity: 0.8;
+}
+
+.blockList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.emptyState {
+  text-align: center;
+  padding: 40px 0;
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+.blockCard {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.blockHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  cursor: pointer;
+}
+
+.blockName {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.blockMeta {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.activeBadge {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.activateBtn {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.blockExpanded {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.dayItem {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.dayItem:last-of-type { border-bottom: none; }
+
+.dayItem.dayDone { opacity: 0.5; }
+
+.dayHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.dayLabel {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.deloadBadge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+}
+
+.deloadBtn {
+  flex-shrink: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.deloadActive {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+}
+
+.dayExercises {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dayExercise {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.duplicateBtn {
+  width: 100%;
+  padding: 10px;
+  margin-top: 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.deleteBtn {
+  width: 100%;
+  padding: 10px;
+  margin-top: 8px;
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  font-size: 13px;
+  cursor: pointer;
+}

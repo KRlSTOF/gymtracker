@@ -1,0 +1,138 @@
+.viewport {
+  padding: 24px 16px 40px;
+  min-height: 100%;
+  overflow-y: auto;
+}
+
+.header {
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--accent-light);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.header h1 {
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.empty {
+  text-align: center;
+  padding: 40px 0;
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+.selectorCard {
+  padding: 14px;
+  margin-bottom: 22px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.16), rgba(20, 20, 20, 0.95));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.selectorCard label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.select {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 14px;
+  appearance: none;
+  cursor: pointer;
+}
+
+.section {
+  margin-bottom: 26px;
+}
+
+.sectionHeader {
+  margin-bottom: 12px;
+}
+
+.sectionHeader h2 {
+  margin-bottom: 4px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.sectionHeader p {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.grid {
+  display: grid;
+  gap: 14px;
+}
+
+.chartCard {
+  min-width: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.cardHeader {
+  margin-bottom: 14px;
+}
+
+.cardHeader h2 {
+  margin-bottom: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.cardHeader p {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chartWrapper {
+  width: 100%;
+  height: 240px;
+}
+
+.noChart {
+  display: grid;
+  min-height: 120px;
+  place-items: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+@media (min-width: 760px) {
+  .viewport {
+    padding: 32px 28px 52px;
+  }
+
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
