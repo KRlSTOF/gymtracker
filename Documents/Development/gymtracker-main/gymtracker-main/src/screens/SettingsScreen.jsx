@@ -8,7 +8,9 @@ import {
   getAllExercises,
   getAppSettings,
   setAppSettings,
-  updateExercise
+  addExercise,
+  updateExercise,
+  deleteExercise
 } from '../data/db.js';
 import styles from './SettingsScreen.module.css';
 
@@ -17,12 +19,24 @@ const DEFAULT_SETTINGS = {
   defaultWeightStep: 2.5
 };
 
+const EMPTY_EXERCISE_DRAFT = {
+  name: '',
+  muscleGroup: '',
+  weightStep: '',
+  restTimer: '',
+  note: ''
+};
+
 export default function SettingsScreen() {
   const { exercises, refreshExercises, refreshBlocks, refreshSettings } = useApp();
   const [importStatus, setImportStatus] = useState('');
   const [settingsStatus, setSettingsStatus] = useState('');
+  const [libraryStatus, setLibraryStatus] = useState('');
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [exerciseSearch, setExerciseSearch] = useState('');
+  const [newExercise, setNewExercise] = useState(EMPTY_EXERCISE_DRAFT);
+  const [editingExerciseId, setEditingExerciseId] = useState(null);
+  const [editExercise, setEditExercise] = useState(EMPTY_EXERCISE_DRAFT);
   const fitnotesRef = useRef(null);
   const backupRef = useRef(null);
 
@@ -41,9 +55,9 @@ export default function SettingsScreen() {
     .filter(ex => {
       const query = exerciseSearch.trim().toLowerCase();
       if (!query) return true;
-      return `${ex.name} ${ex.muscleGroup || ''}`.toLowerCase().includes(query);
+      return `${ex.name} ${ex.muscleGroup || ''} ${ex.note || ex.notes || ''}`.toLowerCase().includes(query);
     })
-    .sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || a.name.localeCompare(b.name))
+    .sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || (a.name || '').localeCompare(b.name || ''))
     .slice(0, 50);
 
   async function handleFitNotesImport(e) {
@@ -124,6 +138,114 @@ export default function SettingsScreen() {
     await refreshExercises();
   }
 
+  function updateNewExerciseDraft(key, value) {
+    setNewExercise(prev => ({ ...prev, [key]: value }));
+    setLibraryStatus('');
+  }
+
+  function updateEditExerciseDraft(key, value) {
+    setEditExercise(prev => ({ ...prev, [key]: value }));
+    setLibraryStatus('');
+  }
+
+  function getDraftFromExercise(exercise) {
+    return {
+      name: exercise.name || '',
+      muscleGroup: exercise.muscleGroup || '',
+      weightStep: exercise.weightStep ?? settings.defaultWeightStep,
+      restTimer: exercise.restTimer ?? settings.defaultRestTimer,
+      note: exercise.note || exercise.notes || ''
+    };
+  }
+
+  function normalizeExerciseDraft(draft) {
+    const name = draft.name.trim();
+    const muscleGroup = draft.muscleGroup.trim() || 'Uncategorized';
+    const draftWeightStep = Number(draft.weightStep);
+    const defaultWeightStep = Number(settings.defaultWeightStep) || DEFAULT_SETTINGS.defaultWeightStep;
+    const weightStep = Math.max(0.1, Number.isFinite(draftWeightStep) && draft.weightStep !== '' ? draftWeightStep : defaultWeightStep);
+    const draftRestTimer = Number(draft.restTimer);
+    const defaultRestTimer = Number(settings.defaultRestTimer) || DEFAULT_SETTINGS.defaultRestTimer;
+    const restTimer = Math.max(0, Math.round(Number.isFinite(draftRestTimer) && draft.restTimer !== '' ? draftRestTimer : defaultRestTimer));
+    const note = draft.note.trim();
+
+    if (!name) {
+      throw new Error('Exercise name is required');
+    }
+
+    return { name, muscleGroup, weightStep, restTimer, note, notes: note };
+  }
+
+  function hasDuplicateExerciseName(name, currentId = null) {
+    const normalizedName = name.trim().toLowerCase();
+    return exercises.some(ex => ex.id !== currentId && (ex.name || '').trim().toLowerCase() === normalizedName);
+  }
+
+  async function handleCreateExercise(e) {
+    e.preventDefault();
+    try {
+      const draft = normalizeExerciseDraft(newExercise);
+      if (hasDuplicateExerciseName(draft.name)) {
+        setLibraryStatus('An exercise with that name already exists.');
+        return;
+      }
+
+      await addExercise({
+        ...draft,
+        favorite: false
+      });
+      await refreshExercises();
+      setNewExercise(EMPTY_EXERCISE_DRAFT);
+      setExerciseSearch('');
+      setLibraryStatus(`Created ${draft.name}`);
+    } catch (err) {
+      setLibraryStatus(err.message);
+    }
+  }
+
+  function startEditingExercise(exercise) {
+    setEditingExerciseId(exercise.id);
+    setEditExercise(getDraftFromExercise(exercise));
+    setLibraryStatus('');
+  }
+
+  function cancelEditingExercise() {
+    setEditingExerciseId(null);
+    setEditExercise(EMPTY_EXERCISE_DRAFT);
+    setLibraryStatus('');
+  }
+
+  async function saveEditedExercise(exercise) {
+    try {
+      const draft = normalizeExerciseDraft(editExercise);
+      if (hasDuplicateExerciseName(draft.name, exercise.id)) {
+        setLibraryStatus('An exercise with that name already exists.');
+        return;
+      }
+
+      await updateExercise({ ...exercise, ...draft });
+      await refreshExercises();
+      setEditingExerciseId(null);
+      setEditExercise(EMPTY_EXERCISE_DRAFT);
+      setLibraryStatus(`Saved ${draft.name}`);
+    } catch (err) {
+      setLibraryStatus(err.message);
+    }
+  }
+
+  async function handleDeleteExercise(exercise) {
+    const confirmed = window.confirm(`Delete "${exercise.name}" from the exercise library? Existing logs are not deleted.`);
+    if (!confirmed) return;
+
+    await deleteExercise(exercise.id);
+    await refreshExercises();
+    if (editingExerciseId === exercise.id) {
+      setEditingExerciseId(null);
+      setEditExercise(EMPTY_EXERCISE_DRAFT);
+    }
+    setLibraryStatus(`Deleted ${exercise.name}`);
+  }
+
   return (
     <div className={styles.viewport}>
       <div className={styles.header}>
@@ -185,7 +307,67 @@ export default function SettingsScreen() {
 
       <div className={styles.section}>
         <h2>Exercise Library</h2>
-        <p className={styles.meta}>{exercises.length} exercises</p>
+        <div className={styles.sectionHeaderRow}>
+          <p className={styles.meta}>{exercises.length} exercises</p>
+          {libraryStatus && <p className={styles.status}>{libraryStatus}</p>}
+        </div>
+        <form className={styles.exerciseForm} onSubmit={handleCreateExercise}>
+          <div className={styles.formTitle}>Create exercise</div>
+          <label className={styles.field}>
+            <span>Name</span>
+            <input
+              type="text"
+              value={newExercise.name}
+              onChange={(e) => updateNewExerciseDraft('name', e.target.value)}
+              placeholder="Incline dumbbell press"
+            />
+          </label>
+          <div className={styles.fieldGrid}>
+            <label className={styles.field}>
+              <span>Muscle group</span>
+              <input
+                type="text"
+                value={newExercise.muscleGroup}
+                onChange={(e) => updateNewExerciseDraft('muscleGroup', e.target.value)}
+                placeholder="Chest"
+              />
+            </label>
+            <label className={styles.field}>
+              <span>Weight step (kg)</span>
+              <input
+                type="number"
+                min="0.1"
+                step="0.1"
+                value={newExercise.weightStep}
+                onChange={(e) => updateNewExerciseDraft('weightStep', e.target.value)}
+                placeholder={String(settings.defaultWeightStep)}
+              />
+            </label>
+            <label className={styles.field}>
+              <span>Rest timer (sec)</span>
+              <input
+                type="number"
+                min="0"
+                step="15"
+                value={newExercise.restTimer}
+                onChange={(e) => updateNewExerciseDraft('restTimer', e.target.value)}
+                placeholder={String(settings.defaultRestTimer)}
+              />
+            </label>
+          </div>
+          <label className={styles.field}>
+            <span>Note</span>
+            <textarea
+              value={newExercise.note}
+              onChange={(e) => updateNewExerciseDraft('note', e.target.value)}
+              placeholder="Setup, cues, or substitutions"
+              rows="2"
+            />
+          </label>
+          <button className={styles.btn} type="submit">
+            Create Exercise
+          </button>
+        </form>
         <input
           className={styles.searchInput}
           type="search"
@@ -196,16 +378,100 @@ export default function SettingsScreen() {
         <div className={styles.exerciseList}>
           {filteredExercises.map(ex => (
             <div key={ex.id} className={styles.exerciseItem}>
-              <button
-                className={`${styles.favoriteBtn} ${ex.favorite ? styles.favoriteActive : ''}`}
-                onClick={() => toggleFavorite(ex)}
-                aria-label={`${ex.favorite ? 'Unfavorite' : 'Favorite'} ${ex.name}`}
-                title={ex.favorite ? 'Favorite' : 'Not favorite'}
-              >
-                {ex.favorite ? 'Fav' : 'Add'}
-              </button>
-              <span className={styles.exName}>{ex.name}</span>
-              <span className={styles.exGroup}>{ex.muscleGroup}</span>
+              {editingExerciseId === ex.id ? (
+                <div className={styles.editPanel}>
+                  <div className={styles.itemActions}>
+                    <button
+                      className={`${styles.favoriteBtn} ${ex.favorite ? styles.favoriteActive : ''}`}
+                      onClick={() => toggleFavorite(ex)}
+                      aria-label={`${ex.favorite ? 'Unfavorite' : 'Favorite'} ${ex.name}`}
+                      title={ex.favorite ? 'Favorite' : 'Not favorite'}
+                      type="button"
+                    >
+                      {ex.favorite ? 'Fav' : 'Add'}
+                    </button>
+                    <button className={styles.textBtn} type="button" onClick={cancelEditingExercise}>
+                      Cancel
+                    </button>
+                  </div>
+                  <label className={styles.field}>
+                    <span>Name</span>
+                    <input
+                      type="text"
+                      value={editExercise.name}
+                      onChange={(e) => updateEditExerciseDraft('name', e.target.value)}
+                    />
+                  </label>
+                  <div className={styles.fieldGrid}>
+                    <label className={styles.field}>
+                      <span>Muscle group</span>
+                      <input
+                        type="text"
+                        value={editExercise.muscleGroup}
+                        onChange={(e) => updateEditExerciseDraft('muscleGroup', e.target.value)}
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>Weight step (kg)</span>
+                      <input
+                        type="number"
+                        min="0.1"
+                        step="0.1"
+                        value={editExercise.weightStep}
+                        onChange={(e) => updateEditExerciseDraft('weightStep', e.target.value)}
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>Rest timer (sec)</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="15"
+                        value={editExercise.restTimer}
+                        onChange={(e) => updateEditExerciseDraft('restTimer', e.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <label className={styles.field}>
+                    <span>Note</span>
+                    <textarea
+                      value={editExercise.note}
+                      onChange={(e) => updateEditExerciseDraft('note', e.target.value)}
+                      rows="2"
+                    />
+                  </label>
+                  <div className={styles.editActions}>
+                    <button className={styles.primaryBtn} type="button" onClick={() => saveEditedExercise(ex)}>
+                      Save
+                    </button>
+                    <button className={styles.dangerBtn} type="button" onClick={() => handleDeleteExercise(ex)}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <button
+                    className={`${styles.favoriteBtn} ${ex.favorite ? styles.favoriteActive : ''}`}
+                    onClick={() => toggleFavorite(ex)}
+                    aria-label={`${ex.favorite ? 'Unfavorite' : 'Favorite'} ${ex.name}`}
+                    title={ex.favorite ? 'Favorite' : 'Not favorite'}
+                    type="button"
+                  >
+                    {ex.favorite ? 'Fav' : 'Add'}
+                  </button>
+                  <button className={styles.exerciseSummary} type="button" onClick={() => startEditingExercise(ex)}>
+                    <span className={styles.exName}>{ex.name}</span>
+                    <span className={styles.exMeta}>
+                      {ex.muscleGroup || 'Uncategorized'} | {ex.weightStep ?? settings.defaultWeightStep} kg | {ex.restTimer ?? settings.defaultRestTimer}s
+                    </span>
+                    {(ex.note || ex.notes) && <span className={styles.exNote}>{ex.note || ex.notes}</span>}
+                  </button>
+                  <button className={styles.textBtn} type="button" onClick={() => startEditingExercise(ex)}>
+                    Edit
+                  </button>
+                </>
+              )}
             </div>
           ))}
           {filteredExercises.length === 0 && (

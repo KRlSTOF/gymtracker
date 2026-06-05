@@ -1,63 +1,117 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext.jsx';
-import { getLogsByExercise, getHistoryByExercise, getAllLogs, addLog } from '../data/db.js';
+import { getLogsByExercise, getHistoryByExercise, getAllLogs, addLog, updateExercise, getExerciseByName } from '../data/db.js';
 import { findReference } from '../data/calculations.js';
 import styles from './ExerciseSession.module.css';
 
 const RIR_OPTIONS = ['0', '1', '1-2', '2', '2-3', '3', '3-4'];
 
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export default function ExerciseSession() {
   const { dayId, exerciseIndex } = useParams();
   const navigate = useNavigate();
-  const { activeBlock, currentSession, appSettings, setCurrentSession } = useApp();
+  const {
+    activeBlock,
+    currentSession,
+    exercises,
+    appSettings,
+    setCurrentSession,
+    refreshExercises
+  } = useApp();
 
-  const dayIdx = parseInt(dayId);
   const exIdx = parseInt(exerciseIndex);
-  const day = activeBlock?.days[dayIdx];
-  const exercise = day?.exercises[exIdx];
-  const sameExerciseSession = currentSession?.dayId === dayIdx && currentSession?.exerciseIndex === exIdx;
-  const priorExerciseSets = sameExerciseSession ? currentSession.exerciseSets || currentSession.completedSets || [] : [];
+  const usingSessionQueue = Boolean(currentSession?.sessionExercises?.length) &&
+    (String(currentSession.dayId) === String(dayId) || dayId === 'session');
+  const dayIdx = usingSessionQueue ? currentSession.dayId : parseInt(dayId);
+  const day = Number.isFinite(dayIdx) ? activeBlock?.days[dayIdx] : null;
+  const exercise = usingSessionQueue ? currentSession.sessionExercises[exIdx] : day?.exercises[exIdx];
+  const libraryExercise = exercises.find(ex =>
+    exercise?.libraryId ? String(ex.id) === String(exercise.libraryId) : ex.name === exercise?.name
+  );
+
+  const priorExerciseSets = usingSessionQueue
+    ? (currentSession.sessionLogs || []).filter(log => log.sessionExerciseId === exercise?.sessionExerciseId)
+    : [];
 
   const [completedSets, setCompletedSets] = useState(priorExerciseSets);
   const [weight, setWeight] = useState(exercise?.targetWeight || 0);
   const [reps, setReps] = useState(exercise?.targetReps || 10);
   const [rir, setRIR] = useState(exercise?.targetRIR || '2');
-  const [setNote, setSetNote] = useState('');
+  const [exerciseNote, setExerciseNote] = useState(libraryExercise?.note || libraryExercise?.notes || exercise?.note || exercise?.notes || '');
+  const [noteHistory, setNoteHistory] = useState([]);
+  const [noteStatus, setNoteStatus] = useState('');
   const [compromisedForm, setCompromisedForm] = useState(false);
   const [reference, setReference] = useState({ exactMatch: null, anyMatch: null });
-  const [sessionStart] = useState(currentSession?.dayId === dayIdx ? currentSession.sessionStart : Date.now());
-  const [sessionId] = useState(currentSession?.dayId === dayIdx ? currentSession.sessionId : `session-${Date.now()}`);
+  const [sessionStart] = useState(currentSession?.sessionStart || Date.now());
+  const [sessionId] = useState(currentSession?.sessionId || `session-${Date.now()}`);
 
   const currentSet = completedSets.length + 1;
   const totalSets = exercise?.targetSets || 3;
-  const weightStep = exercise?.weightStep || appSettings.defaultWeightStep || 2.5;
+  const weightStep = exercise?.weightStep || libraryExercise?.weightStep || appSettings.defaultWeightStep || 2.5;
 
   useEffect(() => {
-    async function loadReference() {
+    async function loadReferenceAndNotes() {
       if (!exercise) return;
+      const allLogs = await getAllLogs();
+      let matchedLogs = [];
 
       if (exercise.libraryId) {
         const logs = await getLogsByExercise(exercise.libraryId);
+        matchedLogs = logs;
         if (logs.length > 0) {
           setReference(findReference(logs, exercise.targetRIR));
-          return;
         }
       }
 
-      const nameMatchedLogs = (await getAllLogs()).filter(log => log.exerciseName === exercise.name);
-      if (nameMatchedLogs.length > 0) {
-        setReference(findReference(nameMatchedLogs, exercise.targetRIR));
-        return;
+      if (matchedLogs.length === 0) {
+        matchedLogs = allLogs.filter(log => log.exerciseName === exercise.name);
+        if (matchedLogs.length > 0) {
+          setReference(findReference(matchedLogs, exercise.targetRIR));
+        }
       }
 
       const history = await getHistoryByExercise(exercise.name);
-      if (history.length > 0) {
+      if (matchedLogs.length === 0 && history.length > 0) {
         const sorted = [...history].sort((a, b) => new Date(b.date) - new Date(a.date));
         setReference({ exactMatch: null, anyMatch: sorted[0] });
       }
+
+      const notes = [
+        ...matchedLogs
+          .filter(log => log.exerciseNote || log.note)
+          .map(log => ({
+            date: log.date,
+            text: log.exerciseNote || log.note,
+            source: 'Workout'
+          })),
+        ...history
+          .filter(item => item.comment)
+          .map(item => ({
+            date: item.date,
+            text: item.comment,
+            source: 'FitNotes'
+          }))
+      ];
+
+      const seen = new Set();
+      setNoteHistory(notes
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .filter(item => {
+          const key = `${item.date}-${item.text}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .slice(0, 8));
     }
-    loadReference();
+    loadReferenceAndNotes();
   }, [exercise]);
 
   useEffect(() => {
@@ -65,16 +119,25 @@ export default function ExerciseSession() {
       setWeight(exercise.targetWeight);
       setReps(exercise.targetReps);
       setRIR(exercise.targetRIR);
-      setSetNote('');
+      setExerciseNote(libraryExercise?.note || libraryExercise?.notes || exercise.note || exercise.notes || '');
+      setNoteStatus('');
       setCompromisedForm(false);
     }
-  }, [completedSets.length, exercise]);
+  }, [completedSets.length, exercise, libraryExercise]);
 
   if (!exercise) {
-    return <div className={styles.screen}><p>Exercise not found</p></div>;
+    return (
+      <div className={styles.screen}>
+        <div className={styles.emptyState}>
+          <p>No exercise selected. Add an exercise from the workout screen.</p>
+          <button onClick={() => navigate('/')}>Back to Workout</button>
+        </div>
+      </div>
+    );
   }
 
-  const nextExercise = day?.exercises[exIdx + 1];
+  const sessionExercises = currentSession?.sessionExercises || day?.exercises || [];
+  const nextExercise = sessionExercises[exIdx + 1];
   const lastReference = reference.anyMatch || reference.exactMatch;
 
   function quickFillFromLast() {
@@ -84,24 +147,42 @@ export default function ExerciseSession() {
     setRIR(lastReference.rir || exercise.targetRIR || '2');
   }
 
+  async function saveExerciseNote() {
+    const existing = libraryExercise || await getExerciseByName(exercise.name);
+    if (existing) {
+      await updateExercise({ ...existing, note: exerciseNote, notes: exerciseNote, updatedAt: new Date().toISOString() });
+      await refreshExercises();
+    }
+    if (currentSession?.sessionExercises) {
+      setCurrentSession({
+        ...currentSession,
+        sessionExercises: currentSession.sessionExercises.map((item, index) => (
+          index === exIdx ? { ...item, note: exerciseNote } : item
+        ))
+      });
+    }
+    setNoteStatus(existing ? 'Note saved to exercise library' : 'Note saved for this session');
+  }
+
   async function confirmSet() {
-    const previousSessionLogs = currentSession?.dayId === dayIdx
-      ? currentSession.sessionLogs || currentSession.completedSets || []
-      : [];
+    const previousSessionLogs = currentSession?.sessionLogs || [];
+    const sessionExerciseId = exercise.sessionExerciseId || `legacy-${dayIdx}-${exIdx}`;
 
     const setData = {
       sessionId,
+      sessionExerciseId,
       exerciseId: exercise.libraryId,
       exerciseName: exercise.name,
       muscleGroup: exercise.muscleGroup,
-      date: new Date().toISOString().split('T')[0],
-      dayId: dayIdx,
+      date: localDateKey(),
+      dayId,
       exerciseIndex: exIdx,
       setNumber: currentSet,
       weight,
       reps,
       rir,
-      note: setNote.trim(),
+      note: exerciseNote.trim(),
+      exerciseNote: exerciseNote.trim(),
       compromisedForm,
       targetWeight: exercise.targetWeight,
       targetReps: exercise.targetReps,
@@ -116,19 +197,21 @@ export default function ExerciseSession() {
 
     const isLastSet = updatedExerciseSets.length >= totalSets;
     const nextInfo = isLastSet
-      ? { type: 'exercise', exerciseIndex: exIdx + 1, dayId: dayIdx }
+      ? { type: 'exercise', exerciseIndex: exIdx + 1, dayId }
       : { type: 'set', setNumber: currentSet + 1, exercise: exercise.name };
 
     setCurrentSession({
+      ...(currentSession || {}),
       sessionId,
-      dayId: dayIdx,
+      source: currentSession?.source || 'plan',
+      dayId,
       exerciseIndex: exIdx,
       exerciseSets: updatedExerciseSets,
       completedSets: updatedExerciseSets,
       sessionLogs: updatedSessionLogs,
       sessionStart,
       next: nextInfo,
-      exercise,
+      exercise: { ...exercise, note: exerciseNote },
       isLastSet
     });
 
@@ -149,7 +232,7 @@ export default function ExerciseSession() {
         <button className={styles.backBtn} onClick={() => navigate('/')}>{'<'}</button>
         <div className={styles.headerInfo}>
           <div className={styles.headerName}>{exercise.name}</div>
-          <div className={styles.headerProgress}>Set {currentSet} of {totalSets}</div>
+          <div className={styles.headerProgress}>Set {currentSet} of {totalSets} planned</div>
         </div>
         <div style={{ width: 40 }} />
       </div>
@@ -160,6 +243,10 @@ export default function ExerciseSession() {
             <div className={styles.muscleTag}>{exercise.muscleGroup}</div>
             <h1 className={styles.exerciseTitle}>{exercise.name}</h1>
             <div className={styles.targetGrid}>
+              <div className={styles.targetItem}>
+                <label>Sets</label>
+                <div className={styles.targetValue}>{totalSets}</div>
+              </div>
               <div className={styles.targetItem}>
                 <label>Weight</label>
                 <div className={styles.targetValue}>{exercise.targetWeight}<span>kg</span></div>
@@ -193,12 +280,27 @@ export default function ExerciseSession() {
             </div>
           )}
 
-          {exercise.notes && (
-            <div className={styles.exerciseNotes}>
-              <div className={styles.notesLabel}>Exercise notes</div>
-              <p>{exercise.notes}</p>
+          <div className={styles.exerciseNotes}>
+            <div className={styles.notesLabel}>Exercise note</div>
+            <textarea
+              rows="3"
+              value={exerciseNote}
+              onChange={event => setExerciseNote(event.target.value)}
+              placeholder="Technique cues, setup reminders, or planner pointers..."
+            />
+            <div className={styles.noteActions}>
+              <button onClick={saveExerciseNote}>Save Note</button>
+              {noteStatus && <span>{noteStatus}</span>}
             </div>
-          )}
+            {noteHistory.length > 0 && (
+              <div className={styles.pastNotes}>
+                <div className={styles.notesLabel}>Past notes</div>
+                {noteHistory.map((item, index) => (
+                  <p key={`${item.date}-${index}`}><strong>{item.date}</strong> ({item.source}) - {item.text}</p>
+                ))}
+              </div>
+            )}
+          </div>
 
           {completedSets.length > 0 && (
             <div className={styles.completedSection}>
@@ -207,7 +309,6 @@ export default function ExerciseSession() {
                   <span>
                     Set {i + 1} - {s.weight} kg x {s.reps} @ RIR {s.rir}
                     {s.compromisedForm ? ' - form flagged' : ''}
-                    {s.note ? ` - ${s.note}` : ''}
                   </span>
                   <span className={styles.check}>OK</span>
                 </div>
@@ -262,24 +363,14 @@ export default function ExerciseSession() {
               </div>
             </div>
 
-            <div className={styles.setMeta}>
-              <label className={styles.noteLabel} htmlFor="set-note">Set note</label>
-              <textarea
-                id="set-note"
-                rows="2"
-                value={setNote}
-                onChange={e => setSetNote(e.target.value)}
-                placeholder="Technique, pain, setup, or cue..."
+            <label className={styles.flagToggle}>
+              <input
+                type="checkbox"
+                checked={compromisedForm}
+                onChange={e => setCompromisedForm(e.target.checked)}
               />
-              <label className={styles.flagToggle}>
-                <input
-                  type="checkbox"
-                  checked={compromisedForm}
-                  onChange={e => setCompromisedForm(e.target.checked)}
-                />
-                <span>Form compromised</span>
-              </label>
-            </div>
+              <span>Form compromised</span>
+            </label>
           </div>
         </div>
       </div>

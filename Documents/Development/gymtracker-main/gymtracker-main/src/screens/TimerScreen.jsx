@@ -6,7 +6,7 @@ import styles from './TimerScreen.module.css';
 
 export default function TimerScreen() {
   const navigate = useNavigate();
-  const { currentSession, activeBlock, appSettings } = useApp();
+  const { currentSession, appSettings } = useApp();
   const [timeLeft, setTimeLeft] = useState(0);
   const intervalRef = useRef(null);
 
@@ -36,19 +36,18 @@ export default function TimerScreen() {
       return;
     }
 
-    const { next, dayId } = currentSession;
+    const sessionExercises = currentSession.sessionExercises || [];
 
     if (currentSession.isLastSet) {
-      const day = activeBlock?.days[dayId];
-      const nextExIdx = next.exerciseIndex;
+      const nextExIdx = currentSession.next?.exerciseIndex ?? currentSession.exerciseIndex + 1;
 
-      if (day && nextExIdx < day.exercises.length) {
-        navigate(`/exercise/${dayId}/${nextExIdx}`);
+      if (nextExIdx < sessionExercises.length) {
+        navigate(`/exercise/${currentSession.dayId}/${nextExIdx}`);
       } else {
-        navigate(`/summary/${dayId}`);
+        navigate(`/summary/${currentSession.dayId}`);
       }
     } else {
-      navigate(`/exercise/${dayId}/${currentSession.exerciseIndex}`);
+      navigate(`/exercise/${currentSession.dayId}/${currentSession.exerciseIndex}`);
     }
   }
 

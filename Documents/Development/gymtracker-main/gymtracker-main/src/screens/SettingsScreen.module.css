@@ -56,6 +56,7 @@
 }
 
 .field input,
+.field textarea,
 .searchInput {
   width: 100%;
   padding: 11px 12px;
@@ -65,6 +66,13 @@
   color: var(--text-primary);
   font-size: 14px;
   min-height: 42px;
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 68px;
+  font-family: inherit;
+  line-height: 1.4;
 }
 
 .searchInput {
@@ -83,10 +91,52 @@
   margin-bottom: 8px;
 }
 
+.sectionHeaderRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.sectionHeaderRow .meta,
+.sectionHeaderRow .status {
+  margin: 0;
+}
+
+.exerciseForm {
+  padding: 12px;
+  margin-bottom: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.formTitle {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.fieldGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+.exerciseForm .btn {
+  margin-bottom: 0;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  text-align: center;
+  font-weight: 700;
+}
+
 .exerciseList {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 
 .exerciseItem {
@@ -94,25 +144,47 @@
   align-items: center;
   gap: 8px;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: 10px;
   background: var(--bg-card);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
 }
 
-.exName {
+.exerciseSummary {
   flex: 1;
-  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.exName {
+  font-size: 14px;
+  font-weight: 700;
   color: var(--text-primary);
 }
 
-.exGroup {
+.exMeta,
+.exNote {
   font-size: 12px;
   color: var(--text-tertiary);
 }
 
+.exNote {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
 .favoriteBtn {
-  min-width: 42px;
+  flex: 0 0 auto;
+  min-width: 44px;
   padding: 5px 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -127,4 +199,55 @@
   border-color: rgba(59, 130, 246, 0.35);
   background: rgba(59, 130, 246, 0.12);
   color: var(--accent);
+}
+
+.textBtn,
+.primaryBtn,
+.dangerBtn {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: 34px;
+  padding: 7px 11px;
+}
+
+.primaryBtn {
+  flex: 1;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.dangerBtn {
+  flex: 1;
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+}
+
+.editPanel {
+  width: 100%;
+}
+
+.itemActions,
+.editActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.editActions {
+  margin: 0;
+}
+
+@media (min-width: 560px) {
+  .fieldGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
 }

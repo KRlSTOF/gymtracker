@@ -5,6 +5,13 @@ import { getLogsByDate, getAllLogs } from '../data/db.js';
 import { estimate1RM } from '../data/calculations.js';
 import styles from './SessionSummary.module.css';
 
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export default function SessionSummary() {
   const { dayId } = useParams();
   const navigate = useNavigate();
@@ -12,8 +19,9 @@ export default function SessionSummary() {
 
   const [summary, setSummary] = useState(null);
 
-  const day = activeBlock?.days[parseInt(dayId)];
-  const today = new Date().toISOString().split('T')[0];
+  const dayIndex = parseInt(dayId);
+  const day = Number.isFinite(dayIndex) ? activeBlock?.days[dayIndex] : null;
+  const today = localDateKey();
 
   useEffect(() => {
     async function buildSummary() {
@@ -23,13 +31,19 @@ export default function SessionSummary() {
 
       const totalTonnage = sessionLogs.reduce((sum, l) => sum + l.weight * l.reps, 0);
       const setsCompleted = sessionLogs.length;
-      const setsTarget = day?.exercises.reduce((sum, ex) => sum + ex.targetSets, 0) || 0;
+      const setsTarget = (currentSession?.sessionExercises || day?.exercises || [])
+        .reduce((sum, ex) => sum + (Number(ex.targetSets) || 0), 0);
       const compromisedSets = sessionLogs.filter(l => l.compromisedForm).length;
-      const notes = sessionLogs.filter(l => l.note).map(l => ({
+      const seenNotes = new Set();
+      const notes = sessionLogs.filter(l => l.exerciseNote || l.note).map(l => ({
         exercise: l.exerciseName,
-        set: l.setNumber,
-        note: l.note
-      }));
+        note: l.exerciseNote || l.note
+      })).filter(item => {
+        const key = `${item.exercise}-${item.note}`;
+        if (seenNotes.has(key)) return false;
+        seenNotes.add(key);
+        return true;
+      });
 
       const missed = sessionLogs.filter(l =>
         l.weight < l.targetWeight || l.reps < l.targetReps
@@ -80,7 +94,9 @@ export default function SessionSummary() {
   }, []);
 
   async function handleDone() {
-    await completeDay();
+    if (currentSession?.source !== 'ad_hoc') {
+      await completeDay();
+    }
     clearCurrentSession();
     navigate('/');
   }
@@ -94,7 +110,7 @@ export default function SessionSummary() {
       <div className={styles.viewport}>
         <div className={styles.header}>
           <h1>Session Complete</h1>
-          <p>{day?.name ? `${day.name}` : `Day ${parseInt(dayId) + 1}`}</p>
+          <p>{currentSession?.dayName || day?.name || (Number.isFinite(dayIndex) ? `Day ${dayIndex + 1}` : 'Extra Session')}</p>
         </div>
 
         <div className={styles.cards}>
@@ -132,10 +148,10 @@ export default function SessionSummary() {
 
           {summary.notes.length > 0 && (
             <div className={styles.card}>
-              <h2>Set Notes</h2>
+              <h2>Exercise Notes</h2>
               {summary.notes.map((n, i) => (
                 <div key={i} className={styles.noteItem}>
-                  <span className={styles.statLabel}>{n.exercise} - Set {n.set}</span>
+                  <span className={styles.statLabel}>{n.exercise}</span>
                   <p>{n.note}</p>
                 </div>
               ))}
