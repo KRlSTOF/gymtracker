@@ -218,7 +218,8 @@ export default function WorkoutScreen() {
 
       <div className={styles.list}>
         {(hasActiveSession ? sessionExercises : nextDay?.exercises || []).map((ex, i) => {
-          const done = hasActiveSession ? loggedSetsFor(ex.sessionExerciseId) >= ex.targetSets : ex.completed;
+          const loggedSets = hasActiveSession ? loggedSetsFor(ex.sessionExerciseId) : 0;
+          const done = hasActiveSession ? loggedSets >= ex.targetSets : ex.completed;
           return (
             <div key={ex.sessionExerciseId || i} className={styles.card}>
               <div className={styles.exerciseItem} onClick={() => hasActiveSession ? navigate(`/exercise/${currentSession.dayId}/${i}`) : startPlannedAt(i)}>
@@ -229,12 +230,16 @@ export default function WorkoutScreen() {
                     <span>{ex.targetSets} x {ex.targetReps}</span>
                     <span>{ex.targetWeight} kg</span>
                     <span>RIR {ex.targetRIR}</span>
-                    {hasActiveSession && <span>{loggedSetsFor(ex.sessionExerciseId)} done</span>}
+                    {hasActiveSession && <span>{loggedSets} done</span>}
                   </div>
                   {ex.switchedFrom && <div className={styles.switchNote}>Switched from {ex.switchedFrom}</div>}
                 </div>
                 <div className={`${styles.indicator} ${done ? styles.done : ''}`}>
-                  {done ? 'OK' : '-'}
+                  {done ? (
+                    <span className={styles.indicatorCheck} role="img" aria-label="Exercise complete" />
+                  ) : (
+                    <span className={styles.indicatorCount}>{hasActiveSession ? `${loggedSets}/${ex.targetSets}` : 'Plan'}</span>
+                  )}
                 </div>
               </div>
 

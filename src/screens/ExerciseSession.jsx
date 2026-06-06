@@ -14,6 +14,23 @@ function localDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function formatLogDate(value) {
+  if (!value) return 'Unknown date';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function cleanPastNoteText(value) {
+  const text = String(value || '').trim();
+  const cleaned = text
+    .split('|')
+    .map(part => part.trim())
+    .filter(part => part && !/^RIR\b/i.test(part) && !/^Form compromised$/i.test(part))
+    .join(' | ');
+  return cleaned || text;
+}
+
 export default function ExerciseSession() {
   const { dayId, exerciseIndex } = useParams();
   const navigate = useNavigate();
@@ -44,7 +61,9 @@ export default function ExerciseSession() {
   const [weight, setWeight] = useState(exercise?.targetWeight || 0);
   const [reps, setReps] = useState(exercise?.targetReps || 10);
   const [rir, setRIR] = useState(exercise?.targetRIR || '2');
-  const [exerciseNote, setExerciseNote] = useState(libraryExercise?.note || libraryExercise?.notes || exercise?.note || exercise?.notes || '');
+  const [exerciseNote, setExerciseNote] = useState('');
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [noteHistory, setNoteHistory] = useState([]);
   const [noteStatus, setNoteStatus] = useState('');
   const [compromisedForm, setCompromisedForm] = useState(false);
@@ -59,6 +78,8 @@ export default function ExerciseSession() {
   useEffect(() => {
     async function loadReferenceAndNotes() {
       if (!exercise) return;
+      setReference({ exactMatch: null, anyMatch: null });
+      setNoteHistory([]);
       const allLogs = await getAllLogs();
       let matchedLogs = [];
 
@@ -88,14 +109,22 @@ export default function ExerciseSession() {
           .filter(log => log.exerciseNote || log.note)
           .map(log => ({
             date: log.date,
-            text: log.exerciseNote || log.note,
+            setNumber: log.setNumber,
+            weight: log.weight,
+            reps: log.reps,
+            rir: log.rir,
+            text: cleanPastNoteText(log.exerciseNote || log.note),
             source: 'Workout'
           })),
         ...history
           .filter(item => item.comment)
           .map(item => ({
             date: item.date,
-            text: item.comment,
+            setNumber: item.setNumber,
+            weight: item.weight,
+            reps: item.reps,
+            rir: item.rir,
+            text: cleanPastNoteText(item.comment),
             source: 'FitNotes'
           }))
       ];
@@ -119,7 +148,9 @@ export default function ExerciseSession() {
       setWeight(exercise.targetWeight);
       setReps(exercise.targetReps);
       setRIR(exercise.targetRIR);
-      setExerciseNote(libraryExercise?.note || libraryExercise?.notes || exercise.note || exercise.notes || '');
+      setExerciseNote('');
+      setNotesOpen(false);
+      setHistoryOpen(false);
       setNoteStatus('');
       setCompromisedForm(false);
     }
@@ -139,6 +170,27 @@ export default function ExerciseSession() {
   const sessionExercises = currentSession?.sessionExercises || day?.exercises || [];
   const nextExercise = sessionExercises[exIdx + 1];
   const lastReference = reference.anyMatch || reference.exactMatch;
+  const currentTarget = getSetTarget(currentSet);
+  const upcomingTargets = Array.from(
+    { length: Math.max(0, totalSets - currentSet) },
+    (_, index) => getSetTarget(currentSet + index + 1)
+  ).slice(0, 4);
+  const referenceItems = [
+    reference.exactMatch ? { label: `Target RIR ${exercise.targetRIR}`, item: reference.exactMatch } : null,
+    reference.anyMatch && reference.anyMatch !== reference.exactMatch ? { label: 'Most recent', item: reference.anyMatch } : null
+  ].filter(Boolean);
+
+  function getSetTarget(setNumber) {
+    const perSetTargets = exercise?.setTargets || exercise?.targets || exercise?.sets;
+    const target = Array.isArray(perSetTargets) ? perSetTargets[setNumber - 1] : null;
+
+    return {
+      setNumber,
+      weight: target?.targetWeight ?? target?.weight ?? exercise.targetWeight,
+      reps: target?.targetReps ?? target?.reps ?? exercise.targetReps,
+      rir: target?.targetRIR ?? target?.rir ?? exercise.targetRIR
+    };
+  }
 
   function quickFillFromLast() {
     if (!lastReference) return;
@@ -148,16 +200,21 @@ export default function ExerciseSession() {
   }
 
   async function saveExerciseNote() {
+    const noteText = exerciseNote.trim();
+    if (!noteText) {
+      setNoteStatus('Add a note before saving');
+      return;
+    }
     const existing = libraryExercise || await getExerciseByName(exercise.name);
     if (existing) {
-      await updateExercise({ ...existing, note: exerciseNote, notes: exerciseNote, updatedAt: new Date().toISOString() });
+      await updateExercise({ ...existing, note: noteText, notes: noteText, updatedAt: new Date().toISOString() });
       await refreshExercises();
     }
     if (currentSession?.sessionExercises) {
       setCurrentSession({
         ...currentSession,
         sessionExercises: currentSession.sessionExercises.map((item, index) => (
-          index === exIdx ? { ...item, note: exerciseNote } : item
+          index === exIdx ? { ...item, note: noteText } : item
         ))
       });
     }
@@ -211,7 +268,7 @@ export default function ExerciseSession() {
       sessionLogs: updatedSessionLogs,
       sessionStart,
       next: nextInfo,
-      exercise: { ...exercise, note: exerciseNote },
+      exercise: { ...exercise, note: exerciseNote.trim() },
       isLastSet
     });
 
@@ -242,61 +299,105 @@ export default function ExerciseSession() {
           <div className={styles.targetSection}>
             <div className={styles.muscleTag}>{exercise.muscleGroup}</div>
             <h1 className={styles.exerciseTitle}>{exercise.name}</h1>
-            <div className={styles.targetGrid}>
-              <div className={styles.targetItem}>
-                <label>Sets</label>
-                <div className={styles.targetValue}>{totalSets}</div>
+            <div className={styles.planCard}>
+              <div className={styles.planHeader}>
+                <span>Current target</span>
+                <strong>Set {currentTarget.setNumber} of {totalSets}</strong>
               </div>
-              <div className={styles.targetItem}>
-                <label>Weight</label>
-                <div className={styles.targetValue}>{exercise.targetWeight}<span>kg</span></div>
+              <div className={styles.targetGrid}>
+                <div className={styles.targetItem}>
+                  <label>Weight</label>
+                  <div className={styles.targetValue}>{currentTarget.weight}<span>kg</span></div>
+                </div>
+                <div className={styles.targetItem}>
+                  <label>Reps</label>
+                  <div className={styles.targetValue}>{currentTarget.reps}</div>
+                </div>
+                <div className={styles.targetItem}>
+                  <label>RIR</label>
+                  <div className={styles.targetValue}>{currentTarget.rir}</div>
+                </div>
               </div>
-              <div className={styles.targetItem}>
-                <label>Reps</label>
-                <div className={styles.targetValue}>{exercise.targetReps}</div>
-              </div>
-              <div className={styles.targetItem}>
-                <label>RIR</label>
-                <div className={styles.targetValue}>{exercise.targetRIR}</div>
+              <div className={styles.upcomingTargets}>
+                {upcomingTargets.length > 0 ? upcomingTargets.map(target => (
+                  <div key={target.setNumber} className={styles.upcomingTarget}>
+                    <span>Set {target.setNumber}</span>
+                    <strong>{target.weight} kg x {target.reps}</strong>
+                    <em>RIR {target.rir}</em>
+                  </div>
+                )) : (
+                  <div className={styles.upcomingTarget}>
+                    <span>Plan</span>
+                    <strong>Final planned set</strong>
+                    <em>Log, then move on</em>
+                  </div>
+                )}
               </div>
             </div>
           </div>
 
           {(reference.exactMatch || reference.anyMatch) && (
             <div className={styles.reference}>
-              {reference.exactMatch && (
-                <div className={styles.refLine}>
-                  @ RIR {reference.exactMatch.rir} - {reference.exactMatch.weight} kg x {reference.exactMatch.reps} ({reference.exactMatch.date})
+              <div className={styles.referenceHeader}>
+                <div>
+                  <span>Past RIR context</span>
+                  <strong>Use history without hunting through notes</strong>
                 </div>
-              )}
-              {reference.anyMatch && reference.anyMatch !== reference.exactMatch && (
-                <div className={styles.refLine}>
-                  @ RIR {reference.anyMatch.rir || '?'} - {reference.anyMatch.weight} kg x {reference.anyMatch.reps} ({reference.anyMatch.date})
-                </div>
-              )}
-              <button className={styles.quickFillBtn} onClick={quickFillFromLast}>
-                Fill from last
-              </button>
+                <button className={styles.quickFillBtn} onClick={quickFillFromLast}>
+                  Fill from last
+                </button>
+              </div>
+              <div className={styles.referenceGrid}>
+                {referenceItems.map(({ label, item }) => (
+                  <div key={`${label}-${item.date}-${item.weight}-${item.reps}`} className={styles.referenceCard}>
+                    <span>{label}</span>
+                    <strong>{item.weight} kg x {item.reps}</strong>
+                    <em>RIR {item.rir || '?'} - {formatLogDate(item.date)}</em>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
           <div className={styles.exerciseNotes}>
-            <div className={styles.notesLabel}>Exercise note</div>
-            <textarea
-              rows="3"
-              value={exerciseNote}
-              onChange={event => setExerciseNote(event.target.value)}
-              placeholder="Technique cues, setup reminders, or planner pointers..."
-            />
-            <div className={styles.noteActions}>
-              <button onClick={saveExerciseNote}>Save Note</button>
-              {noteStatus && <span>{noteStatus}</span>}
-            </div>
+            <button className={styles.notesToggle} onClick={() => setNotesOpen(open => !open)}>
+              <span>
+                <strong>Set note</strong>
+                <em>{notesOpen ? 'Hide note field' : 'Collapsed by default'}</em>
+              </span>
+              <b>{notesOpen ? 'Close' : 'Add'}</b>
+            </button>
+            {notesOpen && (
+              <div className={styles.notesBody}>
+                <textarea
+                  rows="3"
+                  value={exerciseNote}
+                  onChange={event => setExerciseNote(event.target.value)}
+                  placeholder="Technique cues, setup reminders, or planner pointers..."
+                />
+                <div className={styles.noteActions}>
+                  <button onClick={saveExerciseNote}>Save Note</button>
+                  {noteStatus && <span>{noteStatus}</span>}
+                </div>
+              </div>
+            )}
             {noteHistory.length > 0 && (
               <div className={styles.pastNotes}>
-                <div className={styles.notesLabel}>Past notes</div>
-                {noteHistory.map((item, index) => (
-                  <p key={`${item.date}-${index}`}><strong>{item.date}</strong> ({item.source}) - {item.text}</p>
+                <button className={styles.historyToggle} onClick={() => setHistoryOpen(open => !open)}>
+                  <span>Past note history</span>
+                  <strong>{historyOpen ? 'Hide' : `Show ${noteHistory.length}`}</strong>
+                </button>
+                {historyOpen && noteHistory.map((item, index) => (
+                  <div key={`${item.date}-${index}`} className={styles.noteHistoryItem}>
+                    <div className={styles.noteHistoryMeta}>
+                      <span>{formatLogDate(item.date)}</span>
+                      <span>{item.source}</span>
+                      <span>Set {item.setNumber ?? '?'}</span>
+                      <span>{item.weight ?? '?'} kg x {item.reps ?? '?'}</span>
+                      <span>RIR {item.rir || '?'}</span>
+                    </div>
+                    <p>{item.text}</p>
+                  </div>
                 ))}
               </div>
             )}
@@ -310,7 +411,7 @@ export default function ExerciseSession() {
                     Set {i + 1} - {s.weight} kg x {s.reps} @ RIR {s.rir}
                     {s.compromisedForm ? ' - form flagged' : ''}
                   </span>
-                  <span className={styles.check}>OK</span>
+                  <span className={styles.check} role="img" aria-label="Set complete" />
                 </div>
               ))}
             </div>
@@ -349,7 +450,14 @@ export default function ExerciseSession() {
             </div>
 
             <div className={styles.rirSection}>
-              <label className={styles.rirLabel}>RIR</label>
+              <div className={styles.rirHeader}>
+                <label className={styles.rirLabel}>RIR</label>
+                {lastReference && (
+                  <span>
+                    Last: {lastReference.weight} kg x {lastReference.reps} @ RIR {lastReference.rir || '?'}
+                  </span>
+                )}
+              </div>
               <div className={styles.rirOptions}>
                 {RIR_OPTIONS.map(option => (
                   <button

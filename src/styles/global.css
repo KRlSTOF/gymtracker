@@ -3,6 +3,11 @@
   --bg-card: #141414;
   --bg-input: #1a1a1a;
   --border: #252525;
+  --glass-bg: rgba(20, 20, 20, 0.72);
+  --glass-bg-strong: rgba(22, 28, 38, 0.82);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-highlight: rgba(255, 255, 255, 0.12);
+  --shadow-soft: 0 20px 55px rgba(0, 0, 0, 0.34);
   --text-primary: #ffffff;
   --text-secondary: #b0b0b0;
   --text-tertiary: #707070;
@@ -25,9 +30,27 @@ html, body, #root {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
-  background: var(--bg-dark);
+  background:
+    radial-gradient(circle at 18% 12%, rgba(59, 130, 246, 0.22), transparent 32%),
+    radial-gradient(circle at 88% 8%, rgba(16, 185, 129, 0.12), transparent 24%),
+    radial-gradient(circle at 82% 82%, rgba(245, 158, 11, 0.12), transparent 30%),
+    linear-gradient(145deg, #07090d 0%, #0a0a0a 48%, #0d1118 100%);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: -18%;
+  pointer-events: none;
+  background:
+    linear-gradient(120deg, transparent 0 42%, rgba(255, 255, 255, 0.06) 50%, transparent 58%),
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.035), transparent 45%);
+  filter: blur(24px);
+  opacity: 0.55;
+  transform: skewY(-7deg);
+  animation: ambientSweep 14s ease-in-out infinite alternate;
 }
 
 input[type="number"]::-webkit-inner-spin-button,
@@ -42,4 +65,103 @@ input[type="number"] {
 
 button {
   font-family: inherit;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease;
+}
+
+button:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+input,
+textarea,
+select {
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: rgba(96, 165, 250, 0.72);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+  outline: none;
+}
+
+[class*="viewport"],
+[class*="screen"] {
+  animation: pageRise 360ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+[class*="section"],
+[class*="Card"],
+[class*="card"],
+[class*="Panel"],
+[class*="panel"],
+[class*="Item"],
+[class*="item"] {
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+[class*="chartCard"],
+[class*="calendarCard"],
+[class*="selectorCard"],
+[class*="exerciseForm"],
+[class*="backfillForm"],
+[class*="planCard"],
+[class*="reference"],
+[class*="exerciseNotes"],
+[class*="completedSection"],
+[class*="exerciseItem"],
+[class*="dayCard"],
+[class*="blockCard"] {
+  background: var(--glass-bg);
+  border-color: var(--glass-border);
+  box-shadow: var(--shadow-soft);
+}
+
+[class*="confirmBtn"],
+[class*="primaryBtn"],
+[class*="activeTab"] {
+  box-shadow: 0 12px 30px rgba(59, 130, 246, 0.25);
+}
+
+@keyframes pageRise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) skewY(-0.45deg);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) skewY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes ambientSweep {
+  from {
+    transform: translate3d(-2%, -1%, 0) skewY(-7deg) rotate(0.001deg);
+  }
+  to {
+    transform: translate3d(3%, 2%, 0) skewY(-4deg) rotate(0.001deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }

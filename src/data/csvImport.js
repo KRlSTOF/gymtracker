@@ -1,8 +1,67 @@
 import Papa from 'papaparse';
 import { addHistoryBatch, addExercise, getExerciseByName, getAppSettings } from './db.js';
 
-// Parse FitNotes CSV format
-// Columns: Date, Exercise, Category, Weight, Weight Unit, Reps, Distance, Distance Unit, Time, Comment
+function cleanText(value) {
+  return String(value ?? '').trim().replace(/^"|"$/g, '');
+}
+
+function parseNumber(value, fallback = 0) {
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseInteger(value, fallback = 0) {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseRIRFromComment(comment) {
+  const match = cleanText(comment).match(/\bRIR\s+([^|,;]+)/i);
+  return match ? match[1].trim() : '';
+}
+
+function parseFitNotesRow(row) {
+  const comment = cleanText(row.Comment);
+
+  return {
+    date: cleanText(row.Date),
+    exerciseName: cleanText(row.Exercise),
+    muscleGroup: cleanText(row.Category) || 'Uncategorized',
+    weight: parseNumber(row.Weight),
+    weightUnit: cleanText(row['Weight Unit']) || 'kgs',
+    reps: parseInteger(row.Reps),
+    rir: parseRIRFromComment(comment),
+    comment
+  };
+}
+
+function parseNormalizedHistoryRow(row) {
+  const notes = cleanText(row.notes);
+
+  return {
+    date: cleanText(row.date),
+    exerciseName: cleanText(row.exercise_name),
+    muscleGroup: cleanText(row.muscle_group) || 'Uncategorized',
+    weight: parseNumber(row.weight),
+    weightUnit: 'kgs',
+    reps: parseInteger(row.reps),
+    rir: cleanText(row.rir),
+    comment: notes,
+    note: notes,
+    notes
+  };
+}
+
+function parseHistoryRow(row) {
+  if (row.exercise_name || row.date) {
+    return parseNormalizedHistoryRow(row);
+  }
+  return parseFitNotesRow(row);
+}
+
+// Parse FitNotes CSV format or normalized historical CSV format.
+// FitNotes columns: Date, Exercise, Category, Weight, Weight Unit, Reps, Distance, Distance Unit, Time, Comment
+// Normalized columns: date, exercise_name, muscle_group, weight, reps, rir, notes
 export function parseFitNotesCSV(file) {
   return new Promise((resolve, reject) => {
     Papa.parse(file, {
@@ -10,16 +69,8 @@ export function parseFitNotesCSV(file) {
       skipEmptyLines: true,
       complete: (results) => {
         const records = results.data
-          .filter(row => row.Date && row.Exercise)
-          .map(row => ({
-            date: row.Date,
-            exerciseName: row.Exercise.trim(),
-            muscleGroup: row.Category?.trim() || 'Uncategorized',
-            weight: parseFloat(row.Weight) || 0,
-            weightUnit: row['Weight Unit'] || 'kgs',
-            reps: parseInt(row.Reps) || 0,
-            comment: row.Comment?.replace(/^"|"$/g, '') || ''
-          }));
+          .map(parseHistoryRow)
+          .filter(record => record.date && record.exerciseName);
         resolve(records);
       },
       error: (err) => reject(err)

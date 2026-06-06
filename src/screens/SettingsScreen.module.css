@@ -57,6 +57,7 @@
 
 .field input,
 .field textarea,
+.select,
 .searchInput {
   width: 100%;
   padding: 11px 12px;
@@ -66,6 +67,10 @@
   color: var(--text-primary);
   font-size: 14px;
   min-height: 42px;
+}
+
+.select {
+  appearance: none;
 }
 
 .field textarea {
@@ -103,7 +108,8 @@
   margin: 0;
 }
 
-.exerciseForm {
+.exerciseForm,
+.backfillForm {
   padding: 12px;
   margin-bottom: 14px;
   background: var(--bg-card);
@@ -124,13 +130,33 @@
   gap: 0;
 }
 
-.exerciseForm .btn {
+.exerciseForm .btn,
+.backfillForm .btn {
   margin-bottom: 0;
   background: var(--accent);
   border-color: var(--accent);
   color: white;
   text-align: center;
   font-weight: 700;
+}
+
+.compactGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 82px;
+  gap: 8px;
+}
+
+.flagRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.flagRow input {
+  accent-color: var(--accent);
 }
 
 .exerciseList {
