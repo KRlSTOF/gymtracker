@@ -387,6 +387,7 @@ function CalendarCard({ calendarDays, calendarMonth, setCalendarMonth, streak })
 export default function AnalyticsScreen() {
   const { activeBlock, appSettings } = useApp();
   const [logs, setLogs] = useState([]);
+  const [activeTab, setActiveTab] = useState('exercise');
   const [selectedExercise, setSelectedExercise] = useState('');
   const [graphMetric, setGraphMetric] = useState('estimated1RM');
   const [selectedReps, setSelectedReps] = useState(5);
@@ -454,113 +455,115 @@ export default function AnalyticsScreen() {
         </div>
       ) : (
         <>
-          <section className={styles.selectorCard}>
-            <div className={styles.controlGrid}>
-              <label>
-                <span>Selected exercise</span>
-                <select
-                  value={selectedExercise}
-                  onChange={event => setSelectedExercise(event.target.value)}
-                  className={styles.select}
-                >
-                  {uniqueExercises.map(name => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>Graph type</span>
-                <select
-                  value={graphMetric}
-                  onChange={event => setGraphMetric(event.target.value)}
-                  className={styles.select}
-                >
-                  {GRAPH_METRICS.map(metric => (
-                    <option key={metric.value} value={metric.value}>{metric.label}</option>
-                  ))}
-                </select>
-              </label>
-              {selectedMetric.needsReps && (
-                <label>
-                  <span>Selected reps</span>
-                  <input
-                    className={styles.numberInput}
-                    type="number"
-                    min="1"
-                    value={selectedReps}
-                    onChange={event => setSelectedReps(Math.max(1, Number(event.target.value) || 1))}
+          <nav className={styles.tabs} aria-label="Analytics sections">
+            {[
+              ['exercise', 'Exercise'],
+              ['calendar', 'Calendar'],
+              ['weekly', 'Weekly']
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                className={activeTab === id ? styles.activeTab : ''}
+                onClick={() => setActiveTab(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+
+          {activeTab === 'exercise' && (
+            <>
+              <section className={styles.selectorCard}>
+                <div className={styles.controlGrid}>
+                  <label>
+                    <span>Selected exercise</span>
+                    <select
+                      value={selectedExercise}
+                      onChange={event => setSelectedExercise(event.target.value)}
+                      className={styles.select}
+                    >
+                      {uniqueExercises.map(name => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Graph type</span>
+                    <select
+                      value={graphMetric}
+                      onChange={event => setGraphMetric(event.target.value)}
+                      className={styles.select}
+                    >
+                      {GRAPH_METRICS.map(metric => (
+                        <option key={metric.value} value={metric.value}>{metric.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {selectedMetric.needsReps && (
+                    <label>
+                      <span>Selected reps</span>
+                      <input
+                        className={styles.numberInput}
+                        type="number"
+                        min="1"
+                        value={selectedReps}
+                        onChange={event => setSelectedReps(Math.max(1, Number(event.target.value) || 1))}
+                      />
+                    </label>
+                  )}
+                </div>
+                <div className={styles.toggleRow}>
+                  <label><input type="checkbox" checked={showPoints} onChange={event => setShowPoints(event.target.checked)} /> Graph points</label>
+                  <label><input type="checkbox" checked={showTrend} onChange={event => setShowTrend(event.target.checked)} /> Trend line</label>
+                  <label><input type="checkbox" checked={yFromZero} onChange={event => setYFromZero(event.target.checked)} /> Y-axis from 0</label>
+                  <label><input type="checkbox" checked={useRIR} onChange={event => setUseRIR(event.target.checked)} /> Use RIR in estimates</label>
+                </div>
+              </section>
+
+              <section className={styles.section}>
+                <div className={styles.sectionHeader}>
+                  <h2>Exercise trend</h2>
+                  <p>{selectedMetric.description} Daily output for {selectedExercise}.</p>
+                </div>
+                <div className={styles.exerciseGrid}>
+                  <ExerciseGraphCard
+                    data={analytics.exerciseGraph}
+                    metric={selectedMetric}
+                    selectedPoint={selectedPoint}
+                    setSelectedPoint={setSelectedPoint}
+                    showPoints={showPoints}
+                    showTrend={showTrend}
+                    yFromZero={yFromZero}
                   />
-                </label>
-              )}
-            </div>
-            <div className={styles.toggleRow}>
-              <label><input type="checkbox" checked={showPoints} onChange={event => setShowPoints(event.target.checked)} /> Graph points</label>
-              <label><input type="checkbox" checked={showTrend} onChange={event => setShowTrend(event.target.checked)} /> Trend line</label>
-              <label><input type="checkbox" checked={yFromZero} onChange={event => setYFromZero(event.target.checked)} /> Y-axis from 0</label>
-              <label><input type="checkbox" checked={useRIR} onChange={event => setUseRIR(event.target.checked)} /> Use RIR in estimates</label>
-            </div>
-          </section>
+                  <PointDetails point={selectedPoint} metric={selectedMetric} />
+                </div>
+              </section>
+            </>
+          )}
 
-          <section className={styles.section}>
-            <div className={styles.sectionHeader}>
-              <h2>Exercise trend</h2>
-              <p>{selectedMetric.description} Daily output for {selectedExercise}.</p>
-            </div>
-            <div className={styles.exerciseGrid}>
-              <ExerciseGraphCard
-                data={analytics.exerciseGraph}
-                metric={selectedMetric}
-                selectedPoint={selectedPoint}
-                setSelectedPoint={setSelectedPoint}
-                showPoints={showPoints}
-                showTrend={showTrend}
-                yFromZero={yFromZero}
-              />
-              <PointDetails point={selectedPoint} metric={selectedMetric} />
-            </div>
-          </section>
+          {activeTab === 'calendar' && (
+            <CalendarCard
+              calendarDays={analytics.calendarDays}
+              calendarMonth={calendarMonth}
+              setCalendarMonth={setCalendarMonth}
+              streak={analytics.streak}
+            />
+          )}
 
-          <CalendarCard
-            calendarDays={analytics.calendarDays}
-            calendarMonth={calendarMonth}
-            setCalendarMonth={setCalendarMonth}
-            streak={analytics.streak}
-          />
-
-          <section className={styles.section}>
-            <div className={styles.sectionHeader}>
-              <h2>Weekly workload</h2>
-              <p>Aggregated from every logged set</p>
-            </div>
-            <div className={styles.grid}>
-              <ChartCard
-                title="Muscle-group tonnage"
-                subtitle="Weekly tonnage by muscle group"
-                data={analytics.weeklyMuscleTonnage}
-                xKey="week"
-              />
-              <ChartCard
-                title="Set density"
-                subtitle="Sets per week by muscle group"
-                data={analytics.weeklySetDensity}
-                xKey="week"
-              />
-              <ChartCard
-                title="Weekly tonnage"
-                subtitle="Total load moved each week"
-                data={analytics.weeklyTonnage}
-                xKey="week"
-                lines={['tonnage']}
-              />
-              <ChartCard
-                title="Average RIR"
-                subtitle="Average logged proximity to failure per week"
-                data={analytics.weeklyAverageRIR}
-                xKey="week"
-                lines={['avgRIR']}
-              />
-            </div>
-          </section>
+          {activeTab === 'weekly' && (
+            <section className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <h2>Weekly workload</h2>
+                <p>Aggregated from every logged set</p>
+              </div>
+              <div className={styles.grid}>
+                <ChartCard title="Muscle-group tonnage" subtitle="Weekly tonnage by muscle group" data={analytics.weeklyMuscleTonnage} xKey="week" />
+                <ChartCard title="Set density" subtitle="Sets per week by muscle group" data={analytics.weeklySetDensity} xKey="week" />
+                <ChartCard title="Weekly tonnage" subtitle="Total load moved each week" data={analytics.weeklyTonnage} xKey="week" lines={['tonnage']} />
+                <ChartCard title="Average RIR" subtitle="Average logged proximity to failure per week" data={analytics.weeklyAverageRIR} xKey="week" lines={['avgRIR']} />
+              </div>
+            </section>
+          )}
         </>
       )}
     </div>

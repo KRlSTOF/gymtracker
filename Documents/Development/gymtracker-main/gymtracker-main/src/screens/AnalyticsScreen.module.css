@@ -30,6 +30,38 @@
   font-size: 14px;
 }
 
+.tabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 6px;
+  background: rgba(10, 10, 10, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+}
+
+.tabs button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tabs .activeTab {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(59, 130, 246, 0.24);
+}
+
 .selectorCard {
   padding: 14px;
   margin-bottom: 22px;

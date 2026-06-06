@@ -10,7 +10,8 @@ import {
   setAppSettings,
   addExercise,
   updateExercise,
-  deleteExercise
+  deleteExercise,
+  addLog
 } from '../data/db.js';
 import styles from './SettingsScreen.module.css';
 
@@ -27,6 +28,57 @@ const EMPTY_EXERCISE_DRAFT = {
   note: ''
 };
 
+const EMPTY_BACKFILL_DRAFT = {
+  date: localDateKey(),
+  exerciseName: '',
+  setNumber: '1',
+  weight: '',
+  reps: '',
+  rir: '2',
+  note: '',
+  compromisedForm: false
+};
+
+const RIR_OPTIONS = ['0', '1', '1-2', '2', '2-3', '3', '3-4'];
+
+const COMMON_MUSCLE_GROUPS = [
+  'Abs',
+  'Back',
+  'Biceps',
+  'Calves',
+  'Cardio',
+  'Chest',
+  'Core',
+  'Forearms',
+  'Full Body',
+  'Glutes',
+  'Hamstrings',
+  'Lower Body',
+  'Quads',
+  'Shoulders',
+  'Triceps',
+  'Upper Body',
+  'Uncategorized'
+];
+
+function makeMuscleGroupOptions(exercises = []) {
+  const groups = new Set(COMMON_MUSCLE_GROUPS);
+
+  exercises.forEach(exercise => {
+    const group = String(exercise.muscleGroup || '').trim();
+    if (group) groups.add(group);
+  });
+
+  return [...groups].sort((a, b) => a.localeCompare(b));
+}
+
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export default function SettingsScreen() {
   const { exercises, refreshExercises, refreshBlocks, refreshSettings } = useApp();
   const [importStatus, setImportStatus] = useState('');
@@ -37,8 +89,11 @@ export default function SettingsScreen() {
   const [newExercise, setNewExercise] = useState(EMPTY_EXERCISE_DRAFT);
   const [editingExerciseId, setEditingExerciseId] = useState(null);
   const [editExercise, setEditExercise] = useState(EMPTY_EXERCISE_DRAFT);
+  const [backfill, setBackfill] = useState(EMPTY_BACKFILL_DRAFT);
+  const [backfillStatus, setBackfillStatus] = useState('');
   const fitnotesRef = useRef(null);
   const backupRef = useRef(null);
+  const muscleGroupOptions = makeMuscleGroupOptions(exercises);
 
   useEffect(() => {
     async function loadSettings() {
@@ -148,6 +203,11 @@ export default function SettingsScreen() {
     setLibraryStatus('');
   }
 
+  function updateBackfillDraft(key, value) {
+    setBackfill(prev => ({ ...prev, [key]: value }));
+    setBackfillStatus('');
+  }
+
   function getDraftFromExercise(exercise) {
     return {
       name: exercise.name || '',
@@ -246,6 +306,67 @@ export default function SettingsScreen() {
     setLibraryStatus(`Deleted ${exercise.name}`);
   }
 
+  async function handleBackfillLog(e) {
+    e.preventDefault();
+    const exerciseName = backfill.exerciseName.trim();
+    const selectedExercise = exercises.find(ex => (ex.name || '').trim().toLowerCase() === exerciseName.toLowerCase());
+    const weightValue = Number(backfill.weight);
+    const repsValue = Number(backfill.reps);
+    const setNumber = Math.max(1, Math.round(Number(backfill.setNumber) || 1));
+
+    if (!exerciseName) {
+      setBackfillStatus('Choose an exercise before logging.');
+      return;
+    }
+    if (!selectedExercise) {
+      setBackfillStatus('Exercise must exist in the library first.');
+      return;
+    }
+    if (!backfill.date || !Number.isFinite(new Date(`${backfill.date}T00:00:00`).getTime())) {
+      setBackfillStatus('Choose a valid training date.');
+      return;
+    }
+    if (!Number.isFinite(weightValue) || weightValue < 0 || !Number.isFinite(repsValue) || repsValue < 0) {
+      setBackfillStatus('Weight and reps must be valid numbers.');
+      return;
+    }
+
+    const note = backfill.note.trim();
+    const timestamp = new Date(`${backfill.date}T12:00:00`).getTime();
+
+    await addLog({
+      sessionId: `backfill-${backfill.date}`,
+      sessionExerciseId: `backfill-${selectedExercise.id}-${backfill.date}`,
+      exerciseId: selectedExercise.id,
+      exerciseName: selectedExercise.name,
+      muscleGroup: selectedExercise.muscleGroup || 'Uncategorized',
+      date: backfill.date,
+      dayId: 'backfill',
+      exerciseIndex: 0,
+      setNumber,
+      weight: weightValue,
+      reps: repsValue,
+      rir: backfill.rir,
+      note,
+      exerciseNote: note,
+      compromisedForm: backfill.compromisedForm,
+      targetWeight: weightValue,
+      targetReps: repsValue,
+      targetRIR: backfill.rir,
+      timestamp
+    });
+
+    setBackfill(prev => ({
+      ...prev,
+      setNumber: String(setNumber + 1),
+      weight: '',
+      reps: '',
+      note: '',
+      compromisedForm: false
+    }));
+    setBackfillStatus(`Logged set ${setNumber} for ${selectedExercise.name} on ${backfill.date}.`);
+  }
+
   return (
     <div className={styles.viewport}>
       <div className={styles.header}>
@@ -296,6 +417,108 @@ export default function SettingsScreen() {
       </div>
 
       <div className={styles.section}>
+        <h2>Retrospective Log</h2>
+        <form className={styles.backfillForm} onSubmit={handleBackfillLog}>
+          <div className={styles.formTitle}>Backfill a completed set</div>
+          <div className={styles.fieldGrid}>
+            <label className={styles.field}>
+              <span>Date</span>
+              <input
+                type="date"
+                value={backfill.date}
+                onChange={(e) => updateBackfillDraft('date', e.target.value)}
+              />
+            </label>
+            <label className={styles.field}>
+              <span>Exercise</span>
+              <input
+                type="text"
+                list="backfill-exercises"
+                value={backfill.exerciseName}
+                onChange={(e) => updateBackfillDraft('exerciseName', e.target.value)}
+                placeholder="Search library"
+              />
+              <datalist id="backfill-exercises">
+                {exercises
+                  .slice()
+                  .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+                  .map(ex => (
+                    <option key={ex.id} value={ex.name} />
+                  ))}
+              </datalist>
+            </label>
+            <label className={styles.field}>
+              <span>Set #</span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={backfill.setNumber}
+                onChange={(e) => updateBackfillDraft('setNumber', e.target.value)}
+              />
+            </label>
+          </div>
+          <div className={styles.compactGrid}>
+            <label className={styles.field}>
+              <span>Weight</span>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                inputMode="decimal"
+                value={backfill.weight}
+                onChange={(e) => updateBackfillDraft('weight', e.target.value)}
+              />
+            </label>
+            <label className={styles.field}>
+              <span>Reps</span>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                inputMode="numeric"
+                value={backfill.reps}
+                onChange={(e) => updateBackfillDraft('reps', e.target.value)}
+              />
+            </label>
+            <label className={styles.field}>
+              <span>RIR</span>
+              <select
+                className={styles.select}
+                value={backfill.rir}
+                onChange={(e) => updateBackfillDraft('rir', e.target.value)}
+              >
+                {RIR_OPTIONS.map(option => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className={styles.field}>
+            <span>Note</span>
+            <textarea
+              rows="2"
+              value={backfill.note}
+              onChange={(e) => updateBackfillDraft('note', e.target.value)}
+              placeholder="Optional context for this set"
+            />
+          </label>
+          <label className={styles.flagRow}>
+            <input
+              type="checkbox"
+              checked={backfill.compromisedForm}
+              onChange={(e) => updateBackfillDraft('compromisedForm', e.target.checked)}
+            />
+            <span>Form compromised</span>
+          </label>
+          <button className={styles.btn} type="submit}>
+            Add Retrospective Set
+          </button>
+          {backfillStatus && <p className={styles.status}>{backfillStatus}</p>}
+        </form>
+      </div>
+
+      <div className={styles.section}>
         <h2>Export</h2>
         <button className={styles.btn} onClick={handleExportJSON}>
           Export Full Backup (JSON)
@@ -327,10 +550,16 @@ export default function SettingsScreen() {
               <span>Muscle group</span>
               <input
                 type="text"
+                list="new-exercise-muscle-groups"
                 value={newExercise.muscleGroup}
                 onChange={(e) => updateNewExerciseDraft('muscleGroup', e.target.value)}
                 placeholder="Chest"
               />
+              <datalist id="new-exercise-muscle-groups">
+                {muscleGroupOptions.map(group => (
+                  <option key={group} value={group} />
+                ))}
+              </datalist>
             </label>
             <label className={styles.field}>
               <span>Weight step (kg)</span>
@@ -407,9 +636,15 @@ export default function SettingsScreen() {
                       <span>Muscle group</span>
                       <input
                         type="text"
+                        list={`edit-exercise-muscle-groups-${ex.id}`}
                         value={editExercise.muscleGroup}
                         onChange={(e) => updateEditExerciseDraft('muscleGroup', e.target.value)}
                       />
+                      <datalist id={`edit-exercise-muscle-groups-${ex.id}`}>
+                        {muscleGroupOptions.map(group => (
+                          <option key={group} value={group} />
+                        ))}
+                      </datalist>
                     </label>
                     <label className={styles.field}>
                       <span>Weight step (kg)</span>

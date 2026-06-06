@@ -15,6 +15,26 @@ const EMPTY_EXERCISE = {
   notes: ''
 };
 
+const COMMON_MUSCLE_GROUPS = [
+  'Abs',
+  'Back',
+  'Biceps',
+  'Calves',
+  'Cardio',
+  'Chest',
+  'Core',
+  'Forearms',
+  'Full Body',
+  'Glutes',
+  'Hamstrings',
+  'Lower Body',
+  'Quads',
+  'Shoulders',
+  'Triceps',
+  'Upper Body',
+  'Uncategorized'
+];
+
 function copy(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -35,6 +55,30 @@ function moveItem(items, fromIndex, toIndex) {
   const [item] = next.splice(fromIndex, 1);
   next.splice(toIndex, 0, item);
   return next;
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function makeMuscleGroupOptions(exercises = [], blocks = []) {
+  const groups = new Set(COMMON_MUSCLE_GROUPS);
+
+  exercises.forEach(exercise => {
+    const group = String(exercise.muscleGroup || '').trim();
+    if (group) groups.add(group);
+  });
+
+  blocks.forEach(block => {
+    (block.days || []).forEach(day => {
+      (day.exercises || []).forEach(exercise => {
+        const group = String(exercise.muscleGroup || '').trim();
+        if (group) groups.add(group);
+      });
+    });
+  });
+
+  return [...groups].sort((a, b) => a.localeCompare(b));
 }
 
 function makeDay(index = 0) {
@@ -115,12 +159,16 @@ function sanitizeBlockForSave(block) {
 }
 
 export default function PlannerScreen() {
-  const { blocks, activeBlock, refreshBlocks, setActiveBlockById } = useApp();
+  const { blocks, activeBlock, exercises, refreshBlocks, setActiveBlockById } = useApp();
   const [draftBlocks, setDraftBlocks] = useState([]);
   const [importing, setImporting] = useState(false);
   const [expandedBlock, setExpandedBlock] = useState(undefined);
   const [savingId, setSavingId] = useState(null);
+  const [selectedDayByBlock, setSelectedDayByBlock] = useState({});
+  const [draggingExercise, setDraggingExercise] = useState(null);
+  const [dragOverExercise, setDragOverExercise] = useState(null);
   const fileRef = useRef(null);
+  const muscleGroupOptions = makeMuscleGroupOptions(exercises, draftBlocks);
 
   useEffect(() => {
     const nextDrafts = blocks.map(normalizeBlock);
@@ -129,6 +177,17 @@ export default function PlannerScreen() {
       if (prev === null) return null;
       if (nextDrafts.some(block => block.id === prev)) return prev;
       return activeBlock?.id || nextDrafts[0]?.id || null;
+    });
+    setSelectedDayByBlock(prev => {
+      const next = {};
+
+      nextDrafts.forEach(block => {
+        const maxIndex = Math.max(0, block.days.length - 1);
+        const savedIndex = toInt(prev[block.id], block.currentDayIndex || 0);
+        next[block.id] = clamp(savedIndex, 0, maxIndex);
+      });
+
+      return next;
     });
   }, [activeBlock?.id, blocks]);
 
@@ -264,6 +323,11 @@ export default function PlannerScreen() {
   }
 
   async function addDay(blockId) {
+    const draft = draftBlocks.find(block => block.id === blockId);
+    if (draft) {
+      setSelectedDayByBlock(prev => ({ ...prev, [blockId]: draft.days.length }));
+    }
+
     await updateDraftAndPersist(blockId, block => ({
       ...block,
       days: [...block.days, makeDay(block.days.length)]
@@ -271,6 +335,15 @@ export default function PlannerScreen() {
   }
 
   async function removeDay(blockId, dayIndex) {
+    const draft = draftBlocks.find(block => block.id === blockId);
+    const maxIndexAfterRemoval = Math.max(0, (draft?.days.length ?? 1) - 2);
+
+    setSelectedDayByBlock(prev => {
+      const currentIndex = toInt(prev[blockId], 0);
+      const nextIndex = currentIndex > dayIndex ? currentIndex - 1 : Math.min(currentIndex, maxIndexAfterRemoval);
+      return { ...prev, [blockId]: nextIndex };
+    });
+
     await updateDraftAndPersist(blockId, block => ({
       ...block,
       days: block.days.filter((_, index) => index !== dayIndex),
@@ -279,6 +352,7 @@ export default function PlannerScreen() {
   }
 
   async function moveDay(blockId, dayIndex, direction) {
+    setSelectedDayByBlock(prev => ({ ...prev, [blockId]: dayIndex + direction }));
     await updateDraftAndPersist(blockId, block => ({
       ...block,
       days: moveItem(block.days, dayIndex, dayIndex + direction)
@@ -316,26 +390,67 @@ export default function PlannerScreen() {
     }));
   }
 
-  async function moveExercise(blockId, dayIndex, exerciseIndex, direction) {
+  function selectDay(blockId, dayIndex) {
+    setSelectedDayByBlock(prev => ({ ...prev, [blockId]: dayIndex }));
+  }
+
+  function isDraggingExercise(blockId, dayIndex, exerciseIndex) {
+    return draggingExercise?.blockId === blockId &&
+      draggingExercise?.dayIndex === dayIndex &&
+      draggingExercise?.exerciseIndex === exerciseIndex;
+  }
+
+  function isDragTarget(blockId, dayIndex, exerciseIndex) {
+    return dragOverExercise?.blockId === blockId &&
+      dragOverExercise?.dayIndex === dayIndex &&
+      dragOverExercise?.exerciseIndex === exerciseIndex &&
+      !isDraggingExercise(blockId, dayIndex, exerciseIndex);
+  }
+
+  function startExerciseDrag(event, blockId, dayIndex, exerciseIndex) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', `${blockId}:${dayIndex}:${exerciseIndex}`);
+    setDraggingExercise({ blockId, dayIndex, exerciseIndex });
+  }
+
+  function handleExerciseDragOver(event, blockId, dayIndex, exerciseIndex) {
+    if (draggingExercise?.blockId !== blockId || draggingExercise?.dayIndex !== dayIndex) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDragOverExercise({ blockId, dayIndex, exerciseIndex });
+  }
+
+  async function handleExerciseDrop(event, blockId, dayIndex, exerciseIndex) {
+    event.preventDefault();
+
+    const source = draggingExercise;
+    setDraggingExercise(null);
+    setDragOverExercise(null);
+
+    if (!source || source.blockId !== blockId || source.dayIndex !== dayIndex || source.exerciseIndex === exerciseIndex) {
+      return;
+    }
+
     await updateDraftAndPersist(blockId, block => ({
       ...block,
       days: block.days.map((day, index) => (
         index === dayIndex
-          ? { ...day, exercises: moveItem(day.exercises, exerciseIndex, exerciseIndex + direction) }
+          ? { ...day, exercises: moveItem(day.exercises, source.exerciseIndex, exerciseIndex) }
           : day
       ))
     }));
+  }
+
+  function endExerciseDrag() {
+    setDraggingExercise(null);
+    setDragOverExercise(null);
   }
 
   return (
     <div className={styles.viewport}>
       <section className={styles.hero}>
         <div>
-          <p className={styles.kicker}>Planner</p>
-          <h1>Build training blocks without leaving your phone.</h1>
-          <p className={styles.subtitle}>
-            Import CSVs, create blocks manually, and keep every day and exercise target editable.
-          </p>
+          <h1>Planner</h1>
         </div>
 
         <div className={styles.heroActions}>
@@ -378,6 +493,8 @@ export default function PlannerScreen() {
           const isExpanded = expandedBlock === block.id;
           const isActive = activeBlock?.id === block.id;
           const exerciseCount = block.days.reduce((total, day) => total + day.exercises.length, 0);
+          const selectedDayIndex = clamp(toInt(selectedDayByBlock[block.id], block.currentDayIndex || 0), 0, Math.max(0, block.days.length - 1));
+          const selectedDay = block.days[selectedDayIndex];
 
           return (
             <article key={block.id} className={`${styles.blockCard} ${isActive ? styles.activeCard : ''}`}>
@@ -436,22 +553,38 @@ export default function PlannerScreen() {
                       </div>
                     )}
 
-                    {block.days.map((day, dayIndex) => (
-                      <section key={`${block.id}-${dayIndex}`} className={styles.dayCard}>
+                    {block.days.length > 0 && (
+                      <>
+                        <div className={styles.dayTabs} aria-label={`${block.name} days`}>
+                          {block.days.map((day, dayIndex) => (
+                            <button
+                              key={`${block.id}-tab-${dayIndex}`}
+                              type="button"
+                              className={`${styles.dayTab} ${selectedDayIndex === dayIndex ? styles.dayTabActive : ''}`}
+                              onClick={() => selectDay(block.id, dayIndex)}
+                              aria-pressed={selectedDayIndex === dayIndex}
+                            >
+                              <span>{day.name || `Day ${dayIndex + 1}`}</span>
+                              <small>W{day.week} D{day.dayNum}{day.isDeload ? ' / Deload' : ''}</small>
+                            </button>
+                          ))}
+                        </div>
+
+                        <section className={styles.dayCard}>
                         <div className={styles.dayTopline}>
                           <div>
-                            <span className={styles.dayEyebrow}>Week {day.week} / Day {day.dayNum}</span>
-                            <h2>{day.name}</h2>
+                            <span className={styles.dayEyebrow}>Week {selectedDay.week} / Day {selectedDay.dayNum}</span>
+                            <h2>{selectedDay.name}</h2>
                           </div>
-                          {day.isDeload && <span className={styles.deloadBadge}>Deload</span>}
+                          {selectedDay.isDeload && <span className={styles.deloadBadge}>Deload</span>}
                         </div>
 
                         <div className={styles.dayFields}>
                           <label>
                             <span>Day name</span>
                             <input
-                              value={day.name}
-                              onChange={e => updateDayField(block.id, dayIndex, 'name', e.target.value)}
+                              value={selectedDay.name}
+                              onChange={e => updateDayField(block.id, selectedDayIndex, 'name', e.target.value)}
                               onBlur={() => persistDraft(block.id)}
                             />
                           </label>
@@ -461,8 +594,8 @@ export default function PlannerScreen() {
                               type="number"
                               inputMode="numeric"
                               min="1"
-                              value={day.week}
-                              onChange={e => updateDayField(block.id, dayIndex, 'week', e.target.value)}
+                              value={selectedDay.week}
+                              onChange={e => updateDayField(block.id, selectedDayIndex, 'week', e.target.value)}
                               onBlur={() => persistDraft(block.id)}
                             />
                           </label>
@@ -472,27 +605,27 @@ export default function PlannerScreen() {
                               type="number"
                               inputMode="numeric"
                               min="1"
-                              value={day.dayNum}
-                              onChange={e => updateDayField(block.id, dayIndex, 'dayNum', e.target.value)}
+                              value={selectedDay.dayNum}
+                              onChange={e => updateDayField(block.id, selectedDayIndex, 'dayNum', e.target.value)}
                               onBlur={() => persistDraft(block.id)}
                             />
                           </label>
                         </div>
 
                         <div className={styles.rowActions}>
-                          <button onClick={() => moveDay(block.id, dayIndex, -1)} disabled={dayIndex === 0}>
+                          <button onClick={() => moveDay(block.id, selectedDayIndex, -1)} disabled={selectedDayIndex === 0}>
                             Move up
                           </button>
-                          <button onClick={() => moveDay(block.id, dayIndex, 1)} disabled={dayIndex === block.days.length - 1}>
+                          <button onClick={() => moveDay(block.id, selectedDayIndex, 1)} disabled={selectedDayIndex === block.days.length - 1}>
                             Move down
                           </button>
                           <button
-                            className={day.isDeload ? styles.warningActive : ''}
-                            onClick={() => toggleDeload(block.id, dayIndex)}
+                            className={selectedDay.isDeload ? styles.warningActive : ''}
+                            onClick={() => toggleDeload(block.id, selectedDayIndex)}
                           >
-                            {day.isDeload ? 'Unset deload' : 'Set deload'}
+                            {selectedDay.isDeload ? 'Unset deload' : 'Set deload'}
                           </button>
-                          <button className={styles.dangerTextBtn} onClick={() => removeDay(block.id, dayIndex)}>
+                          <button className={styles.dangerTextBtn} onClick={() => removeDay(block.id, selectedDayIndex)}>
                             Remove day
                           </button>
                         </div>
@@ -500,22 +633,42 @@ export default function PlannerScreen() {
                         <div className={styles.exerciseList}>
                           <div className={styles.exerciseHeader}>
                             <h3>Exercises</h3>
-                            <button className={styles.smallPrimaryBtn} onClick={() => addExercise(block.id, dayIndex)}>
+                            <button className={styles.smallPrimaryBtn} onClick={() => addExercise(block.id, selectedDayIndex)}>
                               Add exercise
                             </button>
                           </div>
 
-                          {day.exercises.length === 0 && (
+                          {selectedDay.exercises.length === 0 && (
                             <p className={styles.emptyExercises}>No exercises yet.</p>
                           )}
 
-                          {day.exercises.map((exercise, exerciseIndex) => (
-                            <div key={`${block.id}-${dayIndex}-${exerciseIndex}`} className={styles.exerciseCard}>
+                          {selectedDay.exercises.map((exercise, exerciseIndex) => (
+                            <div
+                              key={`${block.id}-${selectedDayIndex}-${exerciseIndex}`}
+                              className={`${styles.exerciseCard} ${isDraggingExercise(block.id, selectedDayIndex, exerciseIndex) ? styles.exerciseDragging : ''} ${isDragTarget(block.id, selectedDayIndex, exerciseIndex) ? styles.exerciseDropTarget : ''}`}
+                              onDragOver={event => handleExerciseDragOver(event, block.id, selectedDayIndex, exerciseIndex)}
+                              onDrop={event => handleExerciseDrop(event, block.id, selectedDayIndex, exerciseIndex)}
+                            >
+                              <div className={styles.exerciseCardHeader}>
+                                <button
+                                  className={styles.dragHandle}
+                                  type="button"
+                                  draggable
+                                  onDragStart={event => startExerciseDrag(event, block.id, selectedDayIndex, exerciseIndex)}
+                                  onDragEnd={endExerciseDrag}
+                                  aria-label={`Drag ${exercise.name} to reorder`}
+                                  title="Drag to reorder"
+                                >
+                                  Grip
+                                </button>
+                                <span className={styles.exercisePosition}>Exercise {exerciseIndex + 1}</span>
+                              </div>
+
                               <label className={styles.fieldWide}>
                                 <span>Exercise name</span>
                                 <input
                                   value={exercise.name}
-                                  onChange={e => updateExerciseField(block.id, dayIndex, exerciseIndex, 'name', e.target.value)}
+                                  onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'name', e.target.value)}
                                   onBlur={() => persistDraft(block.id)}
                                 />
                               </label>
@@ -528,7 +681,7 @@ export default function PlannerScreen() {
                                     inputMode="numeric"
                                     min="0"
                                     value={exercise.targetSets}
-                                    onChange={e => updateExerciseField(block.id, dayIndex, exerciseIndex, 'targetSets', e.target.value)}
+                                    onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'targetSets', e.target.value)}
                                     onBlur={() => persistDraft(block.id)}
                                   />
                                 </label>
@@ -539,7 +692,7 @@ export default function PlannerScreen() {
                                     inputMode="numeric"
                                     min="0"
                                     value={exercise.targetReps}
-                                    onChange={e => updateExerciseField(block.id, dayIndex, exerciseIndex, 'targetReps', e.target.value)}
+                                    onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'targetReps', e.target.value)}
                                     onBlur={() => persistDraft(block.id)}
                                   />
                                 </label>
@@ -551,7 +704,7 @@ export default function PlannerScreen() {
                                     min="0"
                                     step="0.5"
                                     value={exercise.targetWeight}
-                                    onChange={e => updateExerciseField(block.id, dayIndex, exerciseIndex, 'targetWeight', e.target.value)}
+                                    onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'targetWeight', e.target.value)}
                                     onBlur={() => persistDraft(block.id)}
                                   />
                                 </label>
@@ -559,7 +712,7 @@ export default function PlannerScreen() {
                                   <span>RIR</span>
                                   <input
                                     value={exercise.targetRIR}
-                                    onChange={e => updateExerciseField(block.id, dayIndex, exerciseIndex, 'targetRIR', e.target.value)}
+                                    onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'targetRIR', e.target.value)}
                                     onBlur={() => persistDraft(block.id)}
                                   />
                                 </label>
@@ -568,11 +721,17 @@ export default function PlannerScreen() {
                               <label className={styles.fieldWide}>
                                 <span>Muscle group</span>
                                 <input
+                                  list={`planner-muscle-groups-${block.id}-${selectedDayIndex}-${exerciseIndex}`}
                                   value={exercise.muscleGroup}
-                                  onChange={e => updateExerciseField(block.id, dayIndex, exerciseIndex, 'muscleGroup', e.target.value)}
+                                  onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'muscleGroup', e.target.value)}
                                   onBlur={() => persistDraft(block.id)}
                                   placeholder="Chest, Back, Quads..."
                                 />
+                                <datalist id={`planner-muscle-groups-${block.id}-${selectedDayIndex}-${exerciseIndex}`}>
+                                  {muscleGroupOptions.map(group => (
+                                    <option key={group} value={group} />
+                                  ))}
+                                </datalist>
                               </label>
 
                               <label className={styles.fieldWide}>
@@ -580,7 +739,7 @@ export default function PlannerScreen() {
                                 <textarea
                                   rows="2"
                                   value={exercise.note}
-                                  onChange={e => updateExerciseField(block.id, dayIndex, exerciseIndex, 'note', e.target.value)}
+                                  onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'note', e.target.value)}
                                   onBlur={() => persistDraft(block.id)}
                                   placeholder="Setup cues, substitutions, tempo, or constraints..."
                                 />
@@ -588,20 +747,8 @@ export default function PlannerScreen() {
 
                               <div className={styles.rowActions}>
                                 <button
-                                  onClick={() => moveExercise(block.id, dayIndex, exerciseIndex, -1)}
-                                  disabled={exerciseIndex === 0}
-                                >
-                                  Move up
-                                </button>
-                                <button
-                                  onClick={() => moveExercise(block.id, dayIndex, exerciseIndex, 1)}
-                                  disabled={exerciseIndex === day.exercises.length - 1}
-                                >
-                                  Move down
-                                </button>
-                                <button
                                   className={styles.dangerTextBtn}
-                                  onClick={() => removeExercise(block.id, dayIndex, exerciseIndex)}
+                                  onClick={() => removeExercise(block.id, selectedDayIndex, exerciseIndex)}
                                 >
                                   Remove
                                 </button>
@@ -610,7 +757,8 @@ export default function PlannerScreen() {
                           ))}
                         </div>
                       </section>
-                    ))}
+                      </>
+                    )}
                   </div>
                 </div>
               )}
