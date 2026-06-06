@@ -511,7 +511,7 @@ export default function SettingsScreen() {
             />
             <span>Form compromised</span>
           </label>
-          <button className={styles.btn} type="submit}>
+          <button className={styles.btn} type="submit">
             Add Retrospective Set
           </button>
           {backfillStatus && <p className={styles.status}>{backfillStatus}</p>}
