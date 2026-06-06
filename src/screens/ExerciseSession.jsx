@@ -145,9 +145,10 @@ export default function ExerciseSession() {
 
   useEffect(() => {
     if (exercise) {
-      setWeight(exercise.targetWeight);
-      setReps(exercise.targetReps);
-      setRIR(exercise.targetRIR);
+      const target = getSetTarget(completedSets.length + 1);
+      setWeight(target.weight);
+      setReps(target.reps);
+      setRIR(target.rir);
       setExerciseNote('');
       setNotesOpen(false);
       setHistoryOpen(false);
@@ -171,6 +172,8 @@ export default function ExerciseSession() {
   const nextExercise = sessionExercises[exIdx + 1];
   const lastReference = reference.anyMatch || reference.exactMatch;
   const currentTarget = getSetTarget(currentSet);
+  const targetReached = completedSets.length >= totalSets;
+  const displayTarget = targetReached ? getSetTarget(totalSets) : currentTarget;
   const upcomingTargets = Array.from(
     { length: Math.max(0, totalSets - currentSet) },
     (_, index) => getSetTarget(currentSet + index + 1)
@@ -241,9 +244,9 @@ export default function ExerciseSession() {
       note: exerciseNote.trim(),
       exerciseNote: exerciseNote.trim(),
       compromisedForm,
-      targetWeight: exercise.targetWeight,
-      targetReps: exercise.targetReps,
-      targetRIR: exercise.targetRIR,
+      targetWeight: currentTarget.weight,
+      targetReps: currentTarget.reps,
+      targetRIR: currentTarget.rir,
       timestamp: Date.now()
     };
 
@@ -253,9 +256,10 @@ export default function ExerciseSession() {
     setCompletedSets(updatedExerciseSets);
 
     const isLastSet = updatedExerciseSets.length >= totalSets;
+    const nextTarget = getSetTarget(currentSet + 1);
     const nextInfo = isLastSet
       ? { type: 'exercise', exerciseIndex: exIdx + 1, dayId }
-      : { type: 'set', setNumber: currentSet + 1, exercise: exercise.name };
+      : { type: 'set', setNumber: currentSet + 1, exercise: exercise.name, target: nextTarget };
 
     setCurrentSession({
       ...(currentSession || {}),
@@ -272,7 +276,38 @@ export default function ExerciseSession() {
       isLastSet
     });
 
+    if (currentSession?.source === 'ad_hoc' && isLastSet) {
+      return;
+    }
+
     navigate('/timer');
+  }
+
+  function addSetToCurrentExercise() {
+    if (!currentSession?.sessionExercises) return;
+    const previous = exercise.sets?.[exercise.sets.length - 1] || currentTarget || {};
+    const nextSet = {
+      setNumber: totalSets + 1,
+      targetWeight: previous.targetWeight ?? previous.weight ?? weight,
+      targetReps: previous.targetReps ?? previous.reps ?? reps,
+      targetRIR: previous.targetRIR ?? previous.rir ?? rir
+    };
+
+    setCurrentSession({
+      ...currentSession,
+      sessionExercises: currentSession.sessionExercises.map((item, index) => {
+        if (index !== exIdx) return item;
+        const sets = [...(item.sets || []), nextSet];
+        return {
+          ...item,
+          targetSets: sets.length,
+          sets
+        };
+      })
+    });
+    setWeight(nextSet.targetWeight);
+    setReps(nextSet.targetReps);
+    setRIR(nextSet.targetRIR);
   }
 
   function adjustWeight(delta) {
@@ -302,20 +337,20 @@ export default function ExerciseSession() {
             <div className={styles.planCard}>
               <div className={styles.planHeader}>
                 <span>Current target</span>
-                <strong>Set {currentTarget.setNumber} of {totalSets}</strong>
+                <strong>Set {displayTarget.setNumber} of {totalSets}</strong>
               </div>
               <div className={styles.targetGrid}>
                 <div className={styles.targetItem}>
                   <label>Weight</label>
-                  <div className={styles.targetValue}>{currentTarget.weight}<span>kg</span></div>
+                  <div className={styles.targetValue}>{displayTarget.weight}<span>kg</span></div>
                 </div>
                 <div className={styles.targetItem}>
                   <label>Reps</label>
-                  <div className={styles.targetValue}>{currentTarget.reps}</div>
+                  <div className={styles.targetValue}>{displayTarget.reps}</div>
                 </div>
                 <div className={styles.targetItem}>
                   <label>RIR</label>
-                  <div className={styles.targetValue}>{currentTarget.rir}</div>
+                  <div className={styles.targetValue}>{displayTarget.rir}</div>
                 </div>
               </div>
               <div className={styles.upcomingTargets}>
@@ -340,8 +375,7 @@ export default function ExerciseSession() {
             <div className={styles.reference}>
               <div className={styles.referenceHeader}>
                 <div>
-                  <span>Past RIR context</span>
-                  <strong>Use history without hunting through notes</strong>
+                  <span>History</span>
                 </div>
                 <button className={styles.quickFillBtn} onClick={quickFillFromLast}>
                   Fill from last
@@ -363,7 +397,6 @@ export default function ExerciseSession() {
             <button className={styles.notesToggle} onClick={() => setNotesOpen(open => !open)}>
               <span>
                 <strong>Set note</strong>
-                <em>{notesOpen ? 'Hide note field' : 'Collapsed by default'}</em>
               </span>
               <b>{notesOpen ? 'Close' : 'Add'}</b>
             </button>
@@ -418,9 +451,9 @@ export default function ExerciseSession() {
           )}
 
           <div className={styles.inputSection}>
-            <div className={styles.sectionTitle}>Set {currentSet} - Log</div>
+            <div className={styles.sectionTitle}>{targetReached ? 'Planned sets complete' : `Set ${currentSet} - Log`}</div>
 
-            <div className={styles.inputGrid}>
+            {!targetReached && <div className={styles.inputGrid}>
               <div className={styles.inputField}>
                 <label>Weight</label>
                 <div className={styles.inputWrapper}>
@@ -447,9 +480,9 @@ export default function ExerciseSession() {
                   <button onClick={() => adjustReps(1)}>+</button>
                 </div>
               </div>
-            </div>
+            </div>}
 
-            <div className={styles.rirSection}>
+            {!targetReached && <div className={styles.rirSection}>
               <div className={styles.rirHeader}>
                 <label className={styles.rirLabel}>RIR</label>
                 {lastReference && (
@@ -469,16 +502,21 @@ export default function ExerciseSession() {
                   </button>
                 ))}
               </div>
-            </div>
+            </div>}
 
-            <label className={styles.flagToggle}>
+            {!targetReached && <label className={styles.flagToggle}>
               <input
                 type="checkbox"
                 checked={compromisedForm}
                 onChange={e => setCompromisedForm(e.target.checked)}
               />
               <span>Form compromised</span>
-            </label>
+            </label>}
+            {targetReached && (
+              <button className={styles.addSetBtn} type="button" onClick={addSetToCurrentExercise}>
+                Add set
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -492,9 +530,15 @@ export default function ExerciseSession() {
             </div>
           </div>
         )}
-        <button className={styles.confirmBtn} onClick={confirmSet}>
-          Confirm Set
-        </button>
+        {!targetReached ? (
+          <button className={styles.confirmBtn} onClick={confirmSet}>
+            Confirm Set
+          </button>
+        ) : (
+          <button className={styles.confirmBtn} onClick={() => navigate('/')}>
+            Back to workout
+          </button>
+        )}
       </div>
     </div>
   );

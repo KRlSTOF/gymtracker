@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
-import { addBlock, deleteBlock, updateBlock } from '../data/db.js';
+import { addBlock, addExercise as addLibraryExercise, deleteBlock, updateBlock } from '../data/db.js';
 import { parseBlockCSV } from '../data/csvImport.js';
 import styles from './PlannerScreen.module.css';
 
 const EMPTY_EXERCISE = {
-  name: 'New Exercise',
+  libraryId: '',
+  name: '',
   muscleGroup: '',
-  targetSets: 3,
+  targetSets: 1,
   targetReps: 10,
   targetWeight: 0,
   targetRIR: '2',
+  sets: [{ setNumber: 1, targetReps: 10, targetWeight: 0, targetRIR: '2' }],
   note: '',
   notes: ''
 };
@@ -93,15 +95,33 @@ function makeDay(index = 0) {
 
 function normalizeExercise(exercise = {}) {
   const note = String(exercise.note ?? exercise.notes ?? '');
+  const legacySets = Number(exercise.targetSets) || 1;
+  const sets = Array.isArray(exercise.sets) && exercise.sets.length > 0
+    ? exercise.sets
+    : Array.from({ length: legacySets }, (_, index) => ({
+        setNumber: index + 1,
+        targetReps: exercise.targetReps ?? 10,
+        targetWeight: exercise.targetWeight ?? 0,
+        targetRIR: exercise.targetRIR ?? '2'
+      }));
+  const normalizedSets = sets.map((set, index) => ({
+    setNumber: toInt(set.setNumber, index + 1),
+    targetReps: toInt(set.targetReps ?? set.reps, 10),
+    targetWeight: toNumber(set.targetWeight ?? set.weight, 0),
+    targetRIR: String(set.targetRIR ?? set.rir ?? '2')
+  })).sort((a, b) => a.setNumber - b.setNumber);
+  const firstSet = normalizedSets[0] || EMPTY_EXERCISE.sets[0];
 
   return {
     ...exercise,
-    name: String(exercise.name || 'New Exercise'),
+    libraryId: exercise.libraryId || '',
+    name: String(exercise.name || ''),
     muscleGroup: String(exercise.muscleGroup || ''),
-    targetSets: toInt(exercise.targetSets, 3),
-    targetReps: toInt(exercise.targetReps, 10),
-    targetWeight: toNumber(exercise.targetWeight, 0),
-    targetRIR: String(exercise.targetRIR ?? '2'),
+    targetSets: normalizedSets.length,
+    targetReps: firstSet.targetReps,
+    targetWeight: firstSet.targetWeight,
+    targetRIR: firstSet.targetRIR,
+    sets: normalizedSets.map((set, index) => ({ ...set, setNumber: index + 1 })),
     note,
     notes: note
   };
@@ -120,8 +140,8 @@ function normalizeDay(day = {}, index = 0) {
 
 function normalizeBlock(block = {}) {
   const days = (block.days || []).map(normalizeDay);
-  const maxDayIndex = Math.max(0, days.length - 1);
-  const currentDayIndex = Math.min(toInt(block.currentDayIndex, 0), maxDayIndex);
+  const maxDayIndex = Math.max(0, days.length);
+  const currentDayIndex = clamp(toInt(block.currentDayIndex, 0), 0, maxDayIndex);
 
   return {
     ...block,
@@ -144,12 +164,19 @@ function sanitizeBlockForSave(block) {
         const note = String(exercise.note ?? exercise.notes ?? '');
         return {
           ...exercise,
-          name: String(exercise.name).trim() || 'New Exercise',
+          libraryId: exercise.libraryId || '',
+          name: String(exercise.name).trim(),
           muscleGroup: String(exercise.muscleGroup).trim(),
-          targetSets: Math.max(0, toInt(exercise.targetSets, 0)),
+          targetSets: Math.max(1, toInt(exercise.targetSets, 1)),
           targetReps: Math.max(0, toInt(exercise.targetReps, 0)),
           targetWeight: Math.max(0, toNumber(exercise.targetWeight, 0)),
           targetRIR: String(exercise.targetRIR ?? '').trim(),
+          sets: exercise.sets.map((set, setIndex) => ({
+            setNumber: setIndex + 1,
+            targetReps: Math.max(0, toInt(set.targetReps, 0)),
+            targetWeight: Math.max(0, toNumber(set.targetWeight, 0)),
+            targetRIR: String(set.targetRIR ?? '').trim()
+          })),
           note: note.trim(),
           notes: note.trim()
         };
@@ -159,12 +186,14 @@ function sanitizeBlockForSave(block) {
 }
 
 export default function PlannerScreen() {
-  const { blocks, activeBlock, exercises, refreshBlocks, setActiveBlockById } = useApp();
+  const { blocks, activeBlock, exercises, refreshBlocks, refreshExercises, setActiveBlockById } = useApp();
   const [draftBlocks, setDraftBlocks] = useState([]);
   const [importing, setImporting] = useState(false);
   const [expandedBlock, setExpandedBlock] = useState(undefined);
   const [savingId, setSavingId] = useState(null);
   const [selectedDayByBlock, setSelectedDayByBlock] = useState({});
+  const [draggingDay, setDraggingDay] = useState(null);
+  const [dragOverDay, setDragOverDay] = useState(null);
   const [draggingExercise, setDraggingExercise] = useState(null);
   const [dragOverExercise, setDragOverExercise] = useState(null);
   const fileRef = useRef(null);
@@ -232,6 +261,28 @@ export default function PlannerScreen() {
     setImporting(true);
     try {
       const parsed = await parseBlockCSV(file);
+      const libraryByName = new Map(exercises.map(exercise => [String(exercise.name || '').trim().toLowerCase(), exercise]));
+      for (const day of parsed.days) {
+        for (const exercise of day.exercises) {
+          const key = String(exercise.name || '').trim().toLowerCase();
+          let libraryExercise = libraryByName.get(key);
+          if (!libraryExercise && exercise.name) {
+            const id = await addLibraryExercise({
+              name: exercise.name,
+              muscleGroup: exercise.muscleGroup || 'Uncategorized',
+              weightStep: 2.5,
+              restTimer: 120
+            });
+            libraryExercise = { id, name: exercise.name, muscleGroup: exercise.muscleGroup || 'Uncategorized' };
+            libraryByName.set(key, libraryExercise);
+          }
+          if (libraryExercise) {
+            exercise.libraryId = libraryExercise.id;
+            exercise.name = libraryExercise.name;
+            exercise.muscleGroup = libraryExercise.muscleGroup || exercise.muscleGroup;
+          }
+        }
+      }
       const block = normalizeBlock({
         name: parsed.name,
         days: parsed.days,
@@ -239,7 +290,7 @@ export default function PlannerScreen() {
         createdAt: new Date().toISOString()
       });
       const id = await addBlock(block);
-      await refreshBlocks();
+      await Promise.all([refreshExercises(), refreshBlocks()]);
       setExpandedBlock(id);
     } catch (err) {
       alert('Import failed: ' + err.message);
@@ -322,6 +373,49 @@ export default function PlannerScreen() {
     }));
   }
 
+  function selectExerciseFromLibrary(blockId, dayIndex, exerciseIndex, libraryId) {
+    const selected = exercises.find(exercise => String(exercise.id) === String(libraryId));
+    if (!selected) return;
+    setDraftBlock(blockId, block => ({
+      ...block,
+      days: block.days.map((day, index) => {
+        if (index !== dayIndex) return day;
+        return {
+          ...day,
+          exercises: day.exercises.map((exercise, exIndex) => (
+            exIndex === exerciseIndex
+              ? {
+                  ...exercise,
+                  libraryId: selected.id,
+                  name: selected.name,
+                  muscleGroup: selected.muscleGroup || 'Uncategorized'
+                }
+              : exercise
+          ))
+        };
+      })
+    }));
+  }
+
+  function updateSetField(blockId, dayIndex, exerciseIndex, setIndex, field, value) {
+    setDraftBlock(blockId, block => ({
+      ...block,
+      days: block.days.map((day, index) => {
+        if (index !== dayIndex) return day;
+        return {
+          ...day,
+          exercises: day.exercises.map((exercise, exIndex) => {
+            if (exIndex !== exerciseIndex) return exercise;
+            const sets = exercise.sets.map((set, currentSetIndex) => (
+              currentSetIndex === setIndex ? { ...set, [field]: value } : set
+            ));
+            return normalizeExercise({ ...exercise, sets });
+          })
+        };
+      })
+    }));
+  }
+
   async function addDay(blockId) {
     const draft = draftBlocks.find(block => block.id === blockId);
     if (draft) {
@@ -351,14 +445,6 @@ export default function PlannerScreen() {
     }));
   }
 
-  async function moveDay(blockId, dayIndex, direction) {
-    setSelectedDayByBlock(prev => ({ ...prev, [blockId]: dayIndex + direction }));
-    await updateDraftAndPersist(blockId, block => ({
-      ...block,
-      days: moveItem(block.days, dayIndex, dayIndex + direction)
-    }));
-  }
-
   async function toggleDeload(blockId, dayIndex) {
     await updateDraftAndPersist(blockId, block => ({
       ...block,
@@ -373,9 +459,52 @@ export default function PlannerScreen() {
       ...block,
       days: block.days.map((day, index) => (
         index === dayIndex
-          ? { ...day, exercises: [...day.exercises, { ...EMPTY_EXERCISE }] }
+          ? { ...day, exercises: [...day.exercises, { ...EMPTY_EXERCISE, sets: EMPTY_EXERCISE.sets.map(set => ({ ...set })) }] }
           : day
       ))
+    }));
+  }
+
+  async function addSet(blockId, dayIndex, exerciseIndex) {
+    await updateDraftAndPersist(blockId, block => ({
+      ...block,
+      days: block.days.map((day, index) => {
+        if (index !== dayIndex) return day;
+        return {
+          ...day,
+          exercises: day.exercises.map((exercise, exIndex) => {
+            if (exIndex !== exerciseIndex) return exercise;
+            const previous = exercise.sets[exercise.sets.length - 1] || EMPTY_EXERCISE.sets[0];
+            return normalizeExercise({
+              ...exercise,
+              sets: [
+                ...exercise.sets,
+                {
+                  ...previous,
+                  setNumber: exercise.sets.length + 1
+                }
+              ]
+            });
+          })
+        };
+      })
+    }));
+  }
+
+  async function removeSet(blockId, dayIndex, exerciseIndex, setIndex) {
+    await updateDraftAndPersist(blockId, block => ({
+      ...block,
+      days: block.days.map((day, index) => {
+        if (index !== dayIndex) return day;
+        return {
+          ...day,
+          exercises: day.exercises.map((exercise, exIndex) => (
+            exIndex === exerciseIndex
+              ? normalizeExercise({ ...exercise, sets: exercise.sets.filter((_, index) => index !== setIndex) })
+              : exercise
+          ))
+        };
+      })
     }));
   }
 
@@ -392,6 +521,46 @@ export default function PlannerScreen() {
 
   function selectDay(blockId, dayIndex) {
     setSelectedDayByBlock(prev => ({ ...prev, [blockId]: dayIndex }));
+  }
+
+  function isDraggingDay(blockId, dayIndex) {
+    return draggingDay?.blockId === blockId && draggingDay?.dayIndex === dayIndex;
+  }
+
+  function isDayDropTarget(blockId, dayIndex) {
+    return dragOverDay?.blockId === blockId && dragOverDay?.dayIndex === dayIndex && !isDraggingDay(blockId, dayIndex);
+  }
+
+  function startDayDrag(event, blockId, dayIndex) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', `${blockId}:${dayIndex}`);
+    setDraggingDay({ blockId, dayIndex });
+  }
+
+  function handleDayDragOver(event, blockId, dayIndex) {
+    if (draggingDay?.blockId !== blockId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDragOverDay({ blockId, dayIndex });
+  }
+
+  async function handleDayDrop(event, blockId, dayIndex) {
+    event.preventDefault();
+    const source = draggingDay;
+    setDraggingDay(null);
+    setDragOverDay(null);
+    if (!source || source.blockId !== blockId || source.dayIndex === dayIndex) return;
+
+    setSelectedDayByBlock(prev => ({ ...prev, [blockId]: dayIndex }));
+    await updateDraftAndPersist(blockId, block => ({
+      ...block,
+      days: moveItem(block.days, source.dayIndex, dayIndex)
+    }));
+  }
+
+  function endDayDrag() {
+    setDraggingDay(null);
+    setDragOverDay(null);
   }
 
   function isDraggingExercise(blockId, dayIndex, exerciseIndex) {
@@ -493,6 +662,9 @@ export default function PlannerScreen() {
           const isExpanded = expandedBlock === block.id;
           const isActive = activeBlock?.id === block.id;
           const exerciseCount = block.days.reduce((total, day) => total + day.exercises.length, 0);
+          const progressPercent = block.days.length > 0
+            ? Math.min(100, Math.round(((block.currentDayIndex || 0) / block.days.length) * 100))
+            : 0;
           const selectedDayIndex = clamp(toInt(selectedDayByBlock[block.id], block.currentDayIndex || 0), 0, Math.max(0, block.days.length - 1));
           const selectedDay = block.days[selectedDayIndex];
 
@@ -515,6 +687,9 @@ export default function PlannerScreen() {
                   {isActive && <span className={styles.activeBadge}>Active</span>}
                 </div>
               </header>
+              <div className={styles.progressRail} aria-label={`${progressPercent}% complete`}>
+                <span style={{ width: `${progressPercent}%` }} />
+              </div>
 
               {isExpanded && (
                 <div className={styles.editor}>
@@ -526,6 +701,22 @@ export default function PlannerScreen() {
                       onBlur={() => persistDraft(block.id)}
                       onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
                     />
+                  </label>
+
+                  <label className={styles.fieldWide}>
+                    <span>Current position</span>
+                    <select
+                      value={block.currentDayIndex}
+                      onChange={e => updateBlockField(block.id, 'currentDayIndex', Number(e.target.value))}
+                      onBlur={() => persistDraft(block.id)}
+                    >
+                      {block.days.map((day, index) => (
+                        <option key={`${block.id}-position-${index}`} value={index}>
+                          Next: {day.name || `Day ${index + 1}`} (day {index + 1})
+                        </option>
+                      ))}
+                      <option value={block.days.length}>Block complete</option>
+                    </select>
                   </label>
 
                   <div className={styles.actionGrid}>
@@ -560,7 +751,12 @@ export default function PlannerScreen() {
                             <button
                               key={`${block.id}-tab-${dayIndex}`}
                               type="button"
-                              className={`${styles.dayTab} ${selectedDayIndex === dayIndex ? styles.dayTabActive : ''}`}
+                              draggable
+                              onDragStart={event => startDayDrag(event, block.id, dayIndex)}
+                              onDragOver={event => handleDayDragOver(event, block.id, dayIndex)}
+                              onDrop={event => handleDayDrop(event, block.id, dayIndex)}
+                              onDragEnd={endDayDrag}
+                              className={`${styles.dayTab} ${selectedDayIndex === dayIndex ? styles.dayTabActive : ''} ${isDraggingDay(block.id, dayIndex) ? styles.dayTabDragging : ''} ${isDayDropTarget(block.id, dayIndex) ? styles.dayTabDropTarget : ''}`}
                               onClick={() => selectDay(block.id, dayIndex)}
                               aria-pressed={selectedDayIndex === dayIndex}
                             >
@@ -613,12 +809,6 @@ export default function PlannerScreen() {
                         </div>
 
                         <div className={styles.rowActions}>
-                          <button onClick={() => moveDay(block.id, selectedDayIndex, -1)} disabled={selectedDayIndex === 0}>
-                            Move up
-                          </button>
-                          <button onClick={() => moveDay(block.id, selectedDayIndex, 1)} disabled={selectedDayIndex === block.days.length - 1}>
-                            Move down
-                          </button>
                           <button
                             className={selectedDay.isDeload ? styles.warningActive : ''}
                             onClick={() => toggleDeload(block.id, selectedDayIndex)}
@@ -665,74 +855,90 @@ export default function PlannerScreen() {
                               </div>
 
                               <label className={styles.fieldWide}>
-                                <span>Exercise name</span>
-                                <input
-                                  value={exercise.name}
-                                  onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'name', e.target.value)}
+                                <span>Exercise</span>
+                                <select
+                                  value={exercise.libraryId || ''}
+                                  onChange={e => selectExerciseFromLibrary(block.id, selectedDayIndex, exerciseIndex, e.target.value)}
                                   onBlur={() => persistDraft(block.id)}
-                                />
+                                >
+                                  <option value="" disabled>Select from library</option>
+                                  {exercises
+                                    .slice()
+                                    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+                                    .map(option => (
+                                      <option key={option.id} value={option.id}>
+                                        {option.name} - {option.muscleGroup || 'Uncategorized'}
+                                      </option>
+                                    ))}
+                                </select>
                               </label>
-
-                              <div className={styles.exerciseGrid}>
-                                <label>
-                                  <span>Sets</span>
-                                  <input
-                                    type="number"
-                                    inputMode="numeric"
-                                    min="0"
-                                    value={exercise.targetSets}
-                                    onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'targetSets', e.target.value)}
-                                    onBlur={() => persistDraft(block.id)}
-                                  />
-                                </label>
-                                <label>
-                                  <span>Reps</span>
-                                  <input
-                                    type="number"
-                                    inputMode="numeric"
-                                    min="0"
-                                    value={exercise.targetReps}
-                                    onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'targetReps', e.target.value)}
-                                    onBlur={() => persistDraft(block.id)}
-                                  />
-                                </label>
-                                <label>
-                                  <span>Weight</span>
-                                  <input
-                                    type="number"
-                                    inputMode="decimal"
-                                    min="0"
-                                    step="0.5"
-                                    value={exercise.targetWeight}
-                                    onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'targetWeight', e.target.value)}
-                                    onBlur={() => persistDraft(block.id)}
-                                  />
-                                </label>
-                                <label>
-                                  <span>RIR</span>
-                                  <input
-                                    value={exercise.targetRIR}
-                                    onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'targetRIR', e.target.value)}
-                                    onBlur={() => persistDraft(block.id)}
-                                  />
-                                </label>
-                              </div>
 
                               <label className={styles.fieldWide}>
                                 <span>Muscle group</span>
-                                <input
-                                  list={`planner-muscle-groups-${block.id}-${selectedDayIndex}-${exerciseIndex}`}
+                                <select
                                   value={exercise.muscleGroup}
                                   onChange={e => updateExerciseField(block.id, selectedDayIndex, exerciseIndex, 'muscleGroup', e.target.value)}
                                   onBlur={() => persistDraft(block.id)}
-                                  placeholder="Chest, Back, Quads..."
-                                />
-                                <datalist id={`planner-muscle-groups-${block.id}-${selectedDayIndex}-${exerciseIndex}`}>
+                                >
                                   {muscleGroupOptions.map(group => (
-                                    <option key={group} value={group} />
+                                    <option key={group} value={group}>{group}</option>
                                   ))}
-                                </datalist>
+                                </select>
                               </label>
+
+                              <div className={styles.setEditor}>
+                                <div className={styles.setEditorHeader}>
+                                  <span>{exercise.sets.length} set{exercise.sets.length === 1 ? '' : 's'}</span>
+                                  <button type="button" onClick={() => addSet(block.id, selectedDayIndex, exerciseIndex)}>
+                                    Add set
+                                  </button>
+                                </div>
+                                {exercise.sets.map((set, setIndex) => (
+                                  <div key={`${block.id}-${selectedDayIndex}-${exerciseIndex}-set-${setIndex}`} className={styles.setRow}>
+                                    <strong>Set {setIndex + 1}</strong>
+                                    <label>
+                                      <span>Reps</span>
+                                      <input
+                                        type="number"
+                                        inputMode="numeric"
+                                        min="0"
+                                        value={set.targetReps}
+                                        onChange={e => updateSetField(block.id, selectedDayIndex, exerciseIndex, setIndex, 'targetReps', e.target.value)}
+                                        onBlur={() => persistDraft(block.id)}
+                                      />
+                                    </label>
+                                    <label>
+                                      <span>Weight</span>
+                                      <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        min="0"
+                                        step="0.5"
+                                        value={set.targetWeight}
+                                        onChange={e => updateSetField(block.id, selectedDayIndex, exerciseIndex, setIndex, 'targetWeight', e.target.value)}
+                                        onBlur={() => persistDraft(block.id)}
+                                      />
+                                    </label>
+                                    <label>
+                                      <span>RIR</span>
+                                      <input
+                                        value={set.targetRIR}
+                                        onChange={e => updateSetField(block.id, selectedDayIndex, exerciseIndex, setIndex, 'targetRIR', e.target.value)}
+                                        onBlur={() => persistDraft(block.id)}
+                                      />
+                                    </label>
+                                    <button
+                                      type="button"
+                                      className={styles.setRemoveBtn}
+                                      onClick={() => removeSet(block.id, selectedDayIndex, exerciseIndex, setIndex)}
+                                      disabled={exercise.sets.length === 1}
+                                      aria-label={`Remove set ${setIndex + 1}`}
+                                    >
+                                      x
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
 
                               <label className={styles.fieldWide}>
                                 <span>Note</span>

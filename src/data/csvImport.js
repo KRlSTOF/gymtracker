@@ -15,6 +15,15 @@ function parseInteger(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function firstSetTarget(exercise) {
+  const first = Array.isArray(exercise.sets) ? exercise.sets[0] : null;
+  return {
+    targetReps: first?.targetReps ?? exercise.targetReps,
+    targetWeight: first?.targetWeight ?? exercise.targetWeight,
+    targetRIR: first?.targetRIR ?? exercise.targetRIR
+  };
+}
+
 function parseRIRFromComment(comment) {
   const match = cleanText(comment).match(/\bRIR\s+([^|,;]+)/i);
   return match ? match[1].trim() : '';
@@ -143,18 +152,29 @@ export function exportBlockAsCSV(block) {
   const rows = [];
   block.days.forEach((day, dayIndex) => {
     day.exercises.forEach(ex => {
-      rows.push({
-        block_name: block.name,
-        week: Math.floor(dayIndex / block.daysPerWeek) + 1,
-        day: (dayIndex % block.daysPerWeek) + 1,
-        day_name: day.name || '',
-        exercise_name: ex.name,
-        muscle_group: ex.muscleGroup,
-        target_sets: ex.targetSets,
-        target_reps: ex.targetReps,
-        target_weight: ex.targetWeight,
-        target_rir: ex.targetRIR,
-        notes: ex.notes || ''
+      const setTargets = Array.isArray(ex.sets) && ex.sets.length > 0
+        ? ex.sets
+        : Array.from({ length: Number(ex.targetSets) || 1 }, (_, index) => ({
+            setNumber: index + 1,
+            targetReps: ex.targetReps,
+            targetWeight: ex.targetWeight,
+            targetRIR: ex.targetRIR
+          }));
+
+      setTargets.forEach((set, setIndex) => {
+        rows.push({
+          block_name: block.name,
+          week: day.week || Math.floor(dayIndex / (block.daysPerWeek || 7)) + 1,
+          day: day.dayNum || (dayIndex % (block.daysPerWeek || 7)) + 1,
+          day_name: day.name || '',
+          exercise_name: ex.name,
+          muscle_group: ex.muscleGroup,
+          set_number: set.setNumber || setIndex + 1,
+          target_reps: set.targetReps ?? ex.targetReps,
+          target_weight: set.targetWeight ?? ex.targetWeight,
+          target_rir: set.targetRIR ?? ex.targetRIR,
+          notes: ex.notes || ex.note || ''
+        });
       });
     });
   });
@@ -171,7 +191,7 @@ export function parseBlockCSV(file) {
       complete: (results) => {
         const rows = results.data.filter(r => r.exercise_name);
         
-        // Group by day
+        // Group by day and exercise, preserving per-set targets when set_number exists.
         const daysMap = new Map();
         rows.forEach(row => {
           const dayKey = `${row.week}-${row.day}`;
@@ -183,14 +203,46 @@ export function parseBlockCSV(file) {
               exercises: []
             });
           }
-          daysMap.get(dayKey).exercises.push({
-            name: row.exercise_name.trim(),
-            muscleGroup: row.muscle_group?.trim() || '',
-            targetSets: parseInt(row.target_sets) || 3,
-            targetReps: parseInt(row.target_reps) || 10,
-            targetWeight: parseFloat(row.target_weight) || 0,
-            targetRIR: row.target_rir?.trim() || '2',
-            notes: row.notes || ''
+
+          const day = daysMap.get(dayKey);
+          const exerciseName = row.exercise_name.trim();
+          const existing = day.exercises.find(exercise => exercise.name.toLowerCase() === exerciseName.toLowerCase());
+          const setTarget = {
+            setNumber: parseInteger(row.set_number, existing ? existing.sets.length + 1 : 1),
+            targetReps: parseInteger(row.target_reps, 10),
+            targetWeight: parseNumber(row.target_weight, 0),
+            targetRIR: row.target_rir?.trim() || '2'
+          };
+
+          if (existing) {
+            existing.sets.push(setTarget);
+            existing.sets.sort((a, b) => a.setNumber - b.setNumber);
+            existing.targetSets = existing.sets.length;
+            Object.assign(existing, firstSetTarget(existing));
+          } else {
+            day.exercises.push({
+              name: exerciseName,
+              muscleGroup: row.muscle_group?.trim() || '',
+              targetSets: parseInteger(row.target_sets, 1),
+              targetReps: setTarget.targetReps,
+              targetWeight: setTarget.targetWeight,
+              targetRIR: setTarget.targetRIR,
+              sets: [setTarget],
+              notes: row.notes || ''
+            });
+          }
+        });
+
+        daysMap.forEach(day => {
+          day.exercises = day.exercises.map(exercise => {
+            const sets = (exercise.sets || []).sort((a, b) => a.setNumber - b.setNumber);
+            const targets = firstSetTarget({ ...exercise, sets });
+            return {
+              ...exercise,
+              ...targets,
+              targetSets: sets.length || parseInteger(exercise.targetSets, 1),
+              sets
+            };
           });
         });
 

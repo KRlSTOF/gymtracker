@@ -622,6 +622,19 @@
   font-size: 13px;
 }
 
+.addSetBtn {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: var(--radius);
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--accent-light);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .bottomSection {
   padding: 16px 16px 24px;
   border-top: 1px solid var(--border);

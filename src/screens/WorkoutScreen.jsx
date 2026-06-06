@@ -8,16 +8,32 @@ function makeSessionId() {
 }
 
 function snapshotExercise(exercise, overrides = {}) {
+  const sets = Array.isArray(exercise.sets) && exercise.sets.length > 0
+    ? exercise.sets
+    : Array.from({ length: Number(exercise.targetSets) || 1 }, (_, index) => ({
+        setNumber: index + 1,
+        targetReps: Number(exercise.targetReps) || 10,
+        targetWeight: Number(exercise.targetWeight) || 0,
+        targetRIR: exercise.targetRIR || '2'
+      }));
+  const firstSet = sets[0] || {};
+
   return {
     sessionExerciseId: overrides.sessionExerciseId || `session-ex-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     sourceExerciseIndex: overrides.sourceExerciseIndex,
     libraryId: exercise.id || exercise.libraryId,
     name: exercise.name || 'New Exercise',
     muscleGroup: exercise.muscleGroup || 'Uncategorized',
-    targetSets: Number(exercise.targetSets) || 3,
-    targetReps: Number(exercise.targetReps) || 10,
-    targetWeight: Number(exercise.targetWeight) || 0,
-    targetRIR: exercise.targetRIR || '2',
+    targetSets: sets.length,
+    targetReps: Number(firstSet.targetReps ?? exercise.targetReps) || 10,
+    targetWeight: Number(firstSet.targetWeight ?? exercise.targetWeight) || 0,
+    targetRIR: firstSet.targetRIR ?? exercise.targetRIR ?? '2',
+    sets: sets.map((set, index) => ({
+      setNumber: index + 1,
+      targetReps: Number(set.targetReps ?? set.reps) || 10,
+      targetWeight: Number(set.targetWeight ?? set.weight) || 0,
+      targetRIR: set.targetRIR ?? set.rir ?? '2'
+    })),
     weightStep: Number(exercise.weightStep) || undefined,
     restTimer: Number(exercise.restTimer) || undefined,
     note: exercise.note || exercise.notes || '',
@@ -30,6 +46,8 @@ function snapshotExercise(exercise, overrides = {}) {
 export default function WorkoutScreen() {
   const { activeBlock, currentSession, exercises, getNextDay, loading, appSettings, setCurrentSession } = useApp();
   const [exerciseQuery, setExerciseQuery] = useState('');
+  const [draggingSessionExercise, setDraggingSessionExercise] = useState(null);
+  const [dragOverSessionExercise, setDragOverSessionExercise] = useState(null);
   const navigate = useNavigate();
 
   if (loading) return <div className={styles.viewport}><p>Loading...</p></div>;
@@ -95,7 +113,7 @@ export default function WorkoutScreen() {
     const nextExercise = snapshotExercise({
       ...exercise,
       targetWeight,
-      targetSets: 3,
+      targetSets: 1,
       targetReps: 10,
       targetRIR: '2',
       weightStep: exercise.weightStep || appSettings.defaultWeightStep,
@@ -117,18 +135,45 @@ export default function WorkoutScreen() {
   }
 
   function removeSessionExercise(index) {
-    updateSessionExercises(list => list.filter((_, i) => i !== index));
+    if (!currentSession) return;
+    const target = currentSession.sessionExercises[index];
+    setCurrentSession({
+      ...currentSession,
+      sessionExercises: currentSession.sessionExercises.filter((_, i) => i !== index),
+      sessionLogs: (currentSession.sessionLogs || []).filter(log => log.sessionExerciseId !== target?.sessionExerciseId)
+    });
   }
 
-  function moveSessionExercise(index, delta) {
+  function moveSessionExercise(fromIndex, toIndex) {
     updateSessionExercises(list => {
-      const nextIndex = index + delta;
-      if (nextIndex < 0 || nextIndex >= list.length) return list;
+      if (toIndex < 0 || toIndex >= list.length || fromIndex === toIndex) return list;
       const copy = [...list];
-      const [item] = copy.splice(index, 1);
-      copy.splice(nextIndex, 0, item);
+      const [item] = copy.splice(fromIndex, 1);
+      copy.splice(toIndex, 0, item);
       return copy;
     });
+  }
+
+  function startSessionExerciseDrag(event, index) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+    setDraggingSessionExercise(index);
+  }
+
+  function handleSessionExerciseDragOver(event, index) {
+    if (draggingSessionExercise === null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDragOverSessionExercise(index);
+  }
+
+  function handleSessionExerciseDrop(event, index) {
+    event.preventDefault();
+    if (draggingSessionExercise !== null) {
+      moveSessionExercise(draggingSessionExercise, index);
+    }
+    setDraggingSessionExercise(null);
+    setDragOverSessionExercise(null);
   }
 
   function switchSessionExercise(index, libraryId) {
@@ -159,6 +204,9 @@ export default function WorkoutScreen() {
   }
 
   const hasActiveSession = Boolean(currentSession?.sessionExercises);
+  const blockProgressPercent = activeBlock?.days?.length
+    ? Math.min(100, Math.round(((activeBlock.currentDayIndex || 0) / activeBlock.days.length) * 100))
+    : 0;
 
   return (
     <div className={styles.viewport}>
@@ -169,6 +217,14 @@ export default function WorkoutScreen() {
             ? `${currentSession.source === 'ad_hoc' ? 'Extra session' : currentSession.blockName} - adjust today only`
             : activeBlock && nextDay ? `${activeBlock.name}${nextDay.name ? ` - ${nextDay.name}` : ''}` : 'Start a planned or extra session'}
         </p>
+        {activeBlock?.days?.length > 0 && (
+          <div className={styles.progressWrap}>
+            <div className={styles.progressRail}>
+              <span style={{ width: `${blockProgressPercent}%` }} />
+            </div>
+            <small>{Math.min(activeBlock.currentDayIndex || 0, activeBlock.days.length)} / {activeBlock.days.length} days complete</small>
+          </div>
+        )}
       </div>
 
       {!activeBlock && !hasActiveSession && (
@@ -221,7 +277,40 @@ export default function WorkoutScreen() {
           const loggedSets = hasActiveSession ? loggedSetsFor(ex.sessionExerciseId) : 0;
           const done = hasActiveSession ? loggedSets >= ex.targetSets : ex.completed;
           return (
-            <div key={ex.sessionExerciseId || i} className={styles.card}>
+            <div
+              key={ex.sessionExerciseId || i}
+              className={`${styles.card} ${draggingSessionExercise === i ? styles.draggingCard : ''} ${dragOverSessionExercise === i && draggingSessionExercise !== i ? styles.dropTargetCard : ''}`}
+              onDragOver={event => hasActiveSession && handleSessionExerciseDragOver(event, i)}
+              onDrop={event => hasActiveSession && handleSessionExerciseDrop(event, i)}
+            >
+              {hasActiveSession && (
+                <>
+                  <button
+                    className={styles.dragHandle}
+                    type="button"
+                    draggable
+                    onDragStart={event => startSessionExerciseDrag(event, i)}
+                    onDragEnd={() => {
+                      setDraggingSessionExercise(null);
+                      setDragOverSessionExercise(null);
+                    }}
+                    aria-label={`Drag ${ex.name} to reorder`}
+                  >
+                    Grip
+                  </button>
+                  <button
+                    className={styles.cornerRemoveBtn}
+                    type="button"
+                    onClick={event => {
+                      event.stopPropagation();
+                      removeSessionExercise(i);
+                    }}
+                    aria-label={`Remove ${ex.name}`}
+                  >
+                    x
+                  </button>
+                </>
+              )}
               <div className={styles.exerciseItem} onClick={() => hasActiveSession ? navigate(`/exercise/${currentSession.dayId}/${i}`) : startPlannedAt(i)}>
                 <div className={styles.info}>
                   <div className={styles.muscleTag}>{ex.muscleGroup}</div>
@@ -245,15 +334,12 @@ export default function WorkoutScreen() {
 
               {hasActiveSession && (
                 <div className={styles.rowTools}>
-                  <button onClick={() => moveSessionExercise(i, -1)} disabled={i === 0}>Up</button>
-                  <button onClick={() => moveSessionExercise(i, 1)} disabled={i === sessionExercises.length - 1}>Down</button>
                   <select value="" onChange={event => switchSessionExercise(i, event.target.value)}>
                     <option value="">Switch...</option>
                     {exercises.map(option => (
                       <option key={option.id} value={option.id}>{option.name}</option>
                     ))}
                   </select>
-                  <button className={styles.removeBtn} onClick={() => removeSessionExercise(i)}>Remove</button>
                 </div>
               )}
             </div>

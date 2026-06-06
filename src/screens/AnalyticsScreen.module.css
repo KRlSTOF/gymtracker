@@ -396,11 +396,18 @@
   display: grid;
   min-height: 42px;
   padding: 7px;
+  appearance: none;
   background: rgba(255, 255, 255, 0.035);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 10px;
   color: var(--text-secondary);
   font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.calendarDay:disabled {
+  cursor: default;
 }
 
 .calendarDay span {
@@ -424,6 +431,72 @@
   border-color: rgba(16, 185, 129, 0.45);
   background: rgba(16, 185, 129, 0.1);
   color: var(--text-primary);
+}
+
+.selectedDay {
+  border-color: rgba(96, 165, 250, 0.72);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18);
+}
+
+.dateDetails {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.dateDetailsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dateDetailsHeader span {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dateDetailsHeader strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.dateDetails p {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.dateExercise {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.dateExercise span {
+  display: block;
+  color: var(--accent-light);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dateExercise strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.dateExercise em,
+.dateExercise small {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-style: normal;
 }
 
 .blankDay {

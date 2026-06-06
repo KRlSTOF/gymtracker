@@ -10,7 +10,7 @@ import {
   YAxis
 } from 'recharts';
 import { useApp } from '../context/AppContext.jsx';
-import { getAllLogs } from '../data/db.js';
+import { getAllHistory, getAllLogs } from '../data/db.js';
 import {
   buildExerciseGraphData,
   buildMonthlySessionCalendar,
@@ -115,6 +115,53 @@ function buildTrendData(data) {
     ...row,
     trendValue: Math.max(0, Math.round((slope * index + intercept) * 10) / 10)
   }));
+}
+
+function normalizeHistoryRows(history = []) {
+  return history
+    .filter(row => row?.date && row?.exerciseName)
+    .map((row, index) => ({
+      ...row,
+      id: `history-${row.id || index}`,
+      sessionId: row.sessionId || `history-${row.date}`,
+      sessionExerciseId: row.sessionExerciseId || `history-${row.date}-${row.exerciseName}`,
+      exerciseName: row.exerciseName,
+      muscleGroup: row.muscleGroup || 'Uncategorized',
+      weight: Number(row.weight) || 0,
+      reps: Number(row.reps) || 0,
+      rir: row.rir || '',
+      setNumber: row.setNumber,
+      note: row.note || row.notes || row.comment || '',
+      exerciseNote: row.note || row.notes || row.comment || '',
+      source: 'history'
+    }));
+}
+
+function buildDateDetails(logs, date) {
+  const rows = logs.filter(log => log.date === date);
+  const byExercise = {};
+
+  rows.forEach(log => {
+    if (!byExercise[log.exerciseName]) {
+      byExercise[log.exerciseName] = {
+        exerciseName: log.exerciseName,
+        muscleGroup: log.muscleGroup || 'Uncategorized',
+        sets: 0,
+        volume: 0,
+        best: null,
+        notes: []
+      };
+    }
+    const item = byExercise[log.exerciseName];
+    const volume = (Number(log.weight) || 0) * (Number(log.reps) || 0);
+    item.sets += 1;
+    item.volume += volume;
+    if (!item.best || Number(log.weight) > Number(item.best.weight || 0)) item.best = log;
+    const note = log.note || log.exerciseNote;
+    if (note && !item.notes.includes(note)) item.notes.push(note);
+  });
+
+  return Object.values(byExercise).sort((a, b) => a.exerciseName.localeCompare(b.exerciseName));
 }
 
 function ChartCard({ title, subtitle, data, xKey, lines }) {
@@ -337,7 +384,7 @@ function PointDetails({ point, metric }) {
   );
 }
 
-function CalendarCard({ calendarDays, calendarMonth, setCalendarMonth, streak }) {
+function CalendarCard({ calendarDays, calendarMonth, setCalendarMonth, streak, selectedDate, setSelectedDate, dateDetails }) {
   return (
     <section className={styles.calendarCard}>
       <div className={styles.calendarHeader}>
@@ -366,9 +413,12 @@ function CalendarCard({ calendarDays, calendarMonth, setCalendarMonth, streak })
       </div>
       <div className={styles.calendarGrid}>
         {calendarDays.map(day => (
-          <div
+          <button
             key={day.key}
-            className={`${styles.calendarDay} ${day.inMonth ? '' : styles.blankDay} ${day.hasSession ? styles.sessionDay : ''}`}
+            type="button"
+            className={`${styles.calendarDay} ${day.inMonth ? '' : styles.blankDay} ${day.hasSession ? styles.sessionDay : ''} ${selectedDate === day.date ? styles.selectedDay : ''}`}
+            onClick={() => day.inMonth && setSelectedDate(day.date)}
+            disabled={!day.inMonth}
             title={day.hasSession ? `${day.sessionCount} session${day.sessionCount === 1 ? '' : 's'}` : ''}
           >
             {day.inMonth && (
@@ -377,9 +427,29 @@ function CalendarCard({ calendarDays, calendarMonth, setCalendarMonth, streak })
                 {day.hasSession && <strong>{day.sessionCount}</strong>}
               </>
             )}
-          </div>
+          </button>
         ))}
       </div>
+      {selectedDate && (
+        <div className={styles.dateDetails}>
+          <div className={styles.dateDetailsHeader}>
+            <span>{selectedDate}</span>
+            <strong>{dateDetails.length} exercise{dateDetails.length === 1 ? '' : 's'}</strong>
+          </div>
+          {dateDetails.length === 0 ? (
+            <p>No performed exercises on this day.</p>
+          ) : dateDetails.map(item => (
+            <div key={item.exerciseName} className={styles.dateExercise}>
+              <div>
+                <span>{item.muscleGroup}</span>
+                <strong>{item.exerciseName}</strong>
+              </div>
+              <em>{item.sets} sets / {Math.round(item.volume).toLocaleString()} kg</em>
+              {item.best && <small>Best: {item.best.weight} kg x {item.best.reps} @ RIR {item.best.rir || '?'}</small>}
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -397,11 +467,12 @@ export default function AnalyticsScreen() {
   const [useRIR, setUseRIR] = useState(true);
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
+  const [selectedDate, setSelectedDate] = useState('');
 
   useEffect(() => {
     async function load() {
-      const allLogs = await getAllLogs();
-      setLogs(allLogs);
+      const [allLogs, allHistory] = await Promise.all([getAllLogs(), getAllHistory()]);
+      setLogs([...allLogs.map(log => ({ ...log, source: log.source || 'app' })), ...normalizeHistoryRows(allHistory)]);
     }
 
     load();
@@ -437,6 +508,7 @@ export default function AnalyticsScreen() {
       streak: buildWeeklySessionStreak(logs, plannedSessionsPerWeek)
     };
   }, [activeBlock, appSettings, calendarMonth, graphMetric, logs, selectedExercise, selectedReps, useRIR]);
+  const dateDetails = useMemo(() => buildDateDetails(logs, selectedDate), [logs, selectedDate]);
 
   useEffect(() => {
     setSelectedPoint(analytics.exerciseGraph[analytics.exerciseGraph.length - 1] || null);
@@ -547,6 +619,9 @@ export default function AnalyticsScreen() {
               calendarMonth={calendarMonth}
               setCalendarMonth={setCalendarMonth}
               streak={analytics.streak}
+              selectedDate={selectedDate}
+              setSelectedDate={setSelectedDate}
+              dateDetails={dateDetails}
             />
           )}
 

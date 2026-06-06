@@ -58,9 +58,10 @@ export default function TimerScreen() {
 
   const nextInfo = currentSession?.next;
   const completedCount = currentSession?.exerciseSets?.length || currentSession?.completedSets?.length || 0;
+  const nextTarget = nextInfo?.target;
   const nextLabel = currentSession?.isLastSet
     ? 'Next Exercise'
-    : `Set ${nextInfo?.setNumber} - ${exercise?.targetWeight} kg x ${exercise?.targetReps} @ RIR ${exercise?.targetRIR}`;
+    : `Set ${nextInfo?.setNumber} - ${nextTarget?.weight ?? exercise?.targetWeight} kg x ${nextTarget?.reps ?? exercise?.targetReps} @ RIR ${nextTarget?.rir ?? exercise?.targetRIR}`;
 
   return (
     <div className={styles.screen}>
