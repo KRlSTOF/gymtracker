@@ -135,6 +135,50 @@
   accent-color: var(--accent);
 }
 
+.periodGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.periodGroup button {
+  min-height: 34px;
+  padding: 7px 11px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.periodGroup .activePeriod {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.16);
+  color: var(--accent-light);
+}
+
+.workloadControls {
+  display: grid;
+  gap: 12px;
+}
+
+.workloadControls label {
+  display: block;
+}
+
+.workloadControls span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .section {
   margin-bottom: 26px;
 }
@@ -527,6 +571,16 @@
   .controlGrid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: end;
+  }
+
+  .workloadControls {
+    grid-template-columns: minmax(220px, 0.8fr) 1fr;
+    align-items: end;
+  }
+
+  .workloadControls .periodGroup {
+    margin-top: 0;
+    justify-content: flex-end;
   }
 
   .exerciseGrid {

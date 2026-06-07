@@ -428,6 +428,31 @@ export default function PlannerScreen() {
     }));
   }
 
+  async function duplicateWeek(blockId, weekNumber) {
+    const draft = draftBlocks.find(block => block.id === blockId);
+    const sourceWeek = toInt(weekNumber, 1);
+    const sourceDays = (draft?.days || []).filter(day => toInt(day.week, 0) === sourceWeek);
+    if (sourceDays.length === 0) return;
+
+    const firstCopiedDayIndex = draft.days.length;
+    setSelectedDayByBlock(prev => ({ ...prev, [blockId]: firstCopiedDayIndex }));
+
+    await updateDraftAndPersist(blockId, block => {
+      const targetWeek = Math.max(0, ...block.days.map(day => toInt(day.week, 0))) + 1;
+      const copiedDays = block.days
+        .filter(day => toInt(day.week, 0) === sourceWeek)
+        .map(day => ({
+          ...copy(day),
+          week: targetWeek
+        }));
+
+      return {
+        ...block,
+        days: [...block.days, ...copiedDays]
+      };
+    });
+  }
+
   async function removeDay(blockId, dayIndex) {
     const draft = draftBlocks.find(block => block.id === blockId);
     const maxIndexAfterRemoval = Math.max(0, (draft?.days.length ?? 1) - 2);
@@ -809,6 +834,9 @@ export default function PlannerScreen() {
                         </div>
 
                         <div className={styles.rowActions}>
+                          <button onClick={() => duplicateWeek(block.id, selectedDay.week)}>
+                            Duplicate week
+                          </button>
                           <button
                             className={selectedDay.isDeload ? styles.warningActive : ''}
                             onClick={() => toggleDeload(block.id, selectedDayIndex)}

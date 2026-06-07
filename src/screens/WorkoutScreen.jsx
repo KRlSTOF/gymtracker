@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext.jsx';
 import styles from './WorkoutScreen.module.css';
@@ -48,6 +48,11 @@ export default function WorkoutScreen() {
   const [exerciseQuery, setExerciseQuery] = useState('');
   const [draggingSessionExercise, setDraggingSessionExercise] = useState(null);
   const [dragOverSessionExercise, setDragOverSessionExercise] = useState(null);
+  const [isReorderingSessionExercise, setIsReorderingSessionExercise] = useState(false);
+  const [switchQueries, setSwitchQueries] = useState({});
+  const longPressRef = useRef(null);
+  const pendingPointerRef = useRef(null);
+  const suppressClickRef = useRef(false);
   const navigate = useNavigate();
 
   if (loading) return <div className={styles.viewport}><p>Loading...</p></div>;
@@ -144,6 +149,18 @@ export default function WorkoutScreen() {
     });
   }
 
+  function cancelEmptySession() {
+    const hasLogs = (currentSession?.sessionLogs || []).length > 0;
+    if (!hasLogs) {
+      setCurrentSession(null);
+    }
+  }
+
+  function finishCurrentSession() {
+    if (!currentSession) return;
+    navigate(`/summary/${currentSession.dayId}`);
+  }
+
   function moveSessionExercise(fromIndex, toIndex) {
     updateSessionExercises(list => {
       if (toIndex < 0 || toIndex >= list.length || fromIndex === toIndex) return list;
@@ -155,6 +172,10 @@ export default function WorkoutScreen() {
   }
 
   function startSessionExerciseDrag(event, index) {
+    if (shouldSkipReorderStart(event.target)) {
+      event.preventDefault();
+      return;
+    }
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', String(index));
     setDraggingSessionExercise(index);
@@ -174,6 +195,84 @@ export default function WorkoutScreen() {
     }
     setDraggingSessionExercise(null);
     setDragOverSessionExercise(null);
+  }
+
+  function clearPendingReorder() {
+    if (longPressRef.current) {
+      window.clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+    pendingPointerRef.current = null;
+  }
+
+  function resetSessionReorder() {
+    clearPendingReorder();
+    setIsReorderingSessionExercise(false);
+    setDraggingSessionExercise(null);
+    setDragOverSessionExercise(null);
+  }
+
+  function shouldSkipReorderStart(target) {
+    return Boolean(target.closest('button, select, input, textarea, a'));
+  }
+
+  function startSessionExercisePointer(event, index) {
+    if (!hasActiveSession || event.button !== 0 || shouldSkipReorderStart(event.target)) return;
+
+    const cardElement = event.currentTarget;
+    clearPendingReorder();
+    pendingPointerRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      index
+    };
+
+    longPressRef.current = window.setTimeout(() => {
+      setIsReorderingSessionExercise(true);
+      setDraggingSessionExercise(index);
+      setDragOverSessionExercise(index);
+      cardElement.setPointerCapture?.(event.pointerId);
+      longPressRef.current = null;
+    }, 360);
+  }
+
+  function moveSessionExercisePointer(event) {
+    const pending = pendingPointerRef.current;
+    if (!pending || pending.pointerId !== event.pointerId) return;
+
+    if (!isReorderingSessionExercise) {
+      const distance = Math.hypot(event.clientX - pending.startX, event.clientY - pending.startY);
+      if (distance > 10) clearPendingReorder();
+      return;
+    }
+
+    event.preventDefault();
+    const targetCard = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-session-exercise-index]');
+    if (!targetCard) return;
+    const targetIndex = Number(targetCard.dataset.sessionExerciseIndex);
+    if (Number.isInteger(targetIndex)) {
+      setDragOverSessionExercise(targetIndex);
+    }
+  }
+
+  function endSessionExercisePointer(event) {
+    const pending = pendingPointerRef.current;
+    if (!pending || pending.pointerId !== event.pointerId) {
+      clearPendingReorder();
+      return;
+    }
+
+    if (isReorderingSessionExercise && draggingSessionExercise !== null && dragOverSessionExercise !== null) {
+      event.preventDefault();
+      moveSessionExercise(draggingSessionExercise, dragOverSessionExercise);
+      suppressClickRef.current = true;
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 120);
+    }
+
+    resetSessionReorder();
   }
 
   function switchSessionExercise(index, libraryId) {
@@ -199,11 +298,20 @@ export default function WorkoutScreen() {
     }));
   }
 
+  function switchSessionExerciseByName(index, value) {
+    const query = String(value || '').trim().toLowerCase();
+    const replacement = exercises.find(exercise => String(exercise.name || '').trim().toLowerCase() === query);
+    if (!replacement) return;
+    switchSessionExercise(index, replacement.id);
+    setSwitchQueries(prev => ({ ...prev, [index]: '' }));
+  }
+
   function loggedSetsFor(sessionExerciseId) {
     return (currentSession?.sessionLogs || []).filter(log => log.sessionExerciseId === sessionExerciseId).length;
   }
 
   const hasActiveSession = Boolean(currentSession?.sessionExercises);
+  const hasSessionLogs = (currentSession?.sessionLogs || []).length > 0;
   const blockProgressPercent = activeBlock?.days?.length
     ? Math.min(100, Math.round(((activeBlock.currentDayIndex || 0) / activeBlock.days.length) * 100))
     : 0;
@@ -252,6 +360,11 @@ export default function WorkoutScreen() {
             Start Extra Session
           </button>
         )}
+        {hasActiveSession && !hasSessionLogs && (
+          <button className={styles.secondaryBtn} onClick={cancelEmptySession}>
+            Cancel Session
+          </button>
+        )}
       </div>
 
       {hasActiveSession && (
@@ -279,25 +392,20 @@ export default function WorkoutScreen() {
           return (
             <div
               key={ex.sessionExerciseId || i}
-              className={`${styles.card} ${draggingSessionExercise === i ? styles.draggingCard : ''} ${dragOverSessionExercise === i && draggingSessionExercise !== i ? styles.dropTargetCard : ''}`}
+              className={`${styles.card} ${isReorderingSessionExercise ? styles.reorderReady : ''} ${draggingSessionExercise === i ? styles.draggingCard : ''} ${dragOverSessionExercise === i && draggingSessionExercise !== i ? styles.dropTargetCard : ''}`}
+              data-session-exercise-index={i}
+              draggable={hasActiveSession}
+              onDragStart={event => hasActiveSession && startSessionExerciseDrag(event, i)}
               onDragOver={event => hasActiveSession && handleSessionExerciseDragOver(event, i)}
               onDrop={event => hasActiveSession && handleSessionExerciseDrop(event, i)}
+              onDragEnd={resetSessionReorder}
+              onPointerDown={event => startSessionExercisePointer(event, i)}
+              onPointerMove={moveSessionExercisePointer}
+              onPointerUp={endSessionExercisePointer}
+              onPointerCancel={resetSessionReorder}
             >
               {hasActiveSession && (
                 <>
-                  <button
-                    className={styles.dragHandle}
-                    type="button"
-                    draggable
-                    onDragStart={event => startSessionExerciseDrag(event, i)}
-                    onDragEnd={() => {
-                      setDraggingSessionExercise(null);
-                      setDragOverSessionExercise(null);
-                    }}
-                    aria-label={`Drag ${ex.name} to reorder`}
-                  >
-                    Grip
-                  </button>
                   <button
                     className={styles.cornerRemoveBtn}
                     type="button"
@@ -311,7 +419,10 @@ export default function WorkoutScreen() {
                   </button>
                 </>
               )}
-              <div className={styles.exerciseItem} onClick={() => hasActiveSession ? navigate(`/exercise/${currentSession.dayId}/${i}`) : startPlannedAt(i)}>
+              <div className={styles.exerciseItem} onClick={() => {
+                if (suppressClickRef.current) return;
+                hasActiveSession ? navigate(`/exercise/${currentSession.dayId}/${i}`) : startPlannedAt(i);
+              }}>
                 <div className={styles.info}>
                   <div className={styles.muscleTag}>{ex.muscleGroup}</div>
                   <div className={styles.name}>{ex.name}</div>
@@ -334,18 +445,43 @@ export default function WorkoutScreen() {
 
               {hasActiveSession && (
                 <div className={styles.rowTools}>
-                  <select value="" onChange={event => switchSessionExercise(i, event.target.value)}>
-                    <option value="">Switch...</option>
+                  <input
+                    type="search"
+                    list={`switch-options-${i}`}
+                    value={switchQueries[i] || ''}
+                    onChange={event => {
+                      const value = event.target.value;
+                      setSwitchQueries(prev => ({ ...prev, [i]: value }));
+                      switchSessionExerciseByName(i, value);
+                    }}
+                    placeholder="Search to switch exercise"
+                  />
+                  <datalist id={`switch-options-${i}`}>
                     {exercises.map(option => (
-                      <option key={option.id} value={option.id}>{option.name}</option>
+                      <option key={option.id} value={option.name}>{option.muscleGroup || 'Uncategorized'}</option>
                     ))}
-                  </select>
+                  </datalist>
                 </div>
               )}
             </div>
           );
         })}
       </div>
+
+      {hasActiveSession && sessionExercises.length === 0 && (
+        <div className={styles.empty}>
+          <h2>No Exercises</h2>
+          <p>Add an exercise or finish the session.</p>
+        </div>
+      )}
+
+      {hasActiveSession && (
+        <div className={styles.finishActions}>
+          <button className={styles.finishBtn} type="button" onClick={finishCurrentSession}>
+            {currentSession.source === 'ad_hoc' ? 'Finish Extra Session' : 'Finish Workout'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

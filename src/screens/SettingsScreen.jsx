@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
-import { parseFitNotesCSV, importFitNotesData, exportAsCSV } from '../data/csvImport.js';
+import { parseFitNotesCSV, importFitNotesData, exportAsCSV, exportCompletedBlockAsCSV } from '../data/csvImport.js';
 import {
   exportAllData,
   importFullBackup,
@@ -80,12 +80,14 @@ function localDateKey(date = new Date()) {
 }
 
 export default function SettingsScreen() {
-  const { exercises, refreshExercises, refreshBlocks, refreshSettings } = useApp();
+  const { blocks, exercises, refreshExercises, refreshBlocks, refreshSettings } = useApp();
   const [importStatus, setImportStatus] = useState('');
   const [settingsStatus, setSettingsStatus] = useState('');
+  const [exportStatus, setExportStatus] = useState('');
   const [libraryStatus, setLibraryStatus] = useState('');
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [exerciseSearch, setExerciseSearch] = useState('');
+  const [selectedCompletedBlockId, setSelectedCompletedBlockId] = useState('');
   const [newExercise, setNewExercise] = useState(EMPTY_EXERCISE_DRAFT);
   const [editingExerciseId, setEditingExerciseId] = useState(null);
   const [editExercise, setEditExercise] = useState(EMPTY_EXERCISE_DRAFT);
@@ -94,6 +96,12 @@ export default function SettingsScreen() {
   const fitnotesRef = useRef(null);
   const backupRef = useRef(null);
   const muscleGroupOptions = makeMuscleGroupOptions(exercises);
+  const completedBlocks = useMemo(
+    () => blocks
+      .filter(block => (block.days || []).length > 0 && (Number(block.currentDayIndex) || 0) >= (block.days || []).length)
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '') || (a.name || '').localeCompare(b.name || '')),
+    [blocks]
+  );
 
   useEffect(() => {
     async function loadSettings() {
@@ -105,6 +113,16 @@ export default function SettingsScreen() {
     }
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    if (completedBlocks.length === 0) {
+      setSelectedCompletedBlockId('');
+      return;
+    }
+    if (!completedBlocks.some(block => String(block.id) === String(selectedCompletedBlockId))) {
+      setSelectedCompletedBlockId(String(completedBlocks[0].id));
+    }
+  }, [completedBlocks, selectedCompletedBlockId]);
 
   const filteredExercises = exercises
     .filter(ex => {
@@ -141,6 +159,21 @@ export default function SettingsScreen() {
     const csv = exportAsCSV(logs, exs);
     const blob = new Blob([csv], { type: 'text/csv' });
     downloadBlob(blob, `gym-tracker-export-${new Date().toISOString().split('T')[0]}.csv`);
+  }
+
+  async function handleCompletedBlockExport() {
+    const block = completedBlocks.find(item => String(item.id) === String(selectedCompletedBlockId));
+    if (!block) {
+      setExportStatus('Choose a completed block to export.');
+      return;
+    }
+
+    const logs = await getAllLogs();
+    const csv = exportCompletedBlockAsCSV(block, logs);
+    const safeName = String(block.name || 'training-block').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'training-block';
+    const blob = new Blob([csv], { type: 'text/csv' });
+    downloadBlob(blob, `${safeName}-completed-${new Date().toISOString().split('T')[0]}.csv`);
+    setExportStatus(`Exported ${block.name}. Completed sets are matched to the plan by day, exercise, and set.`);
   }
 
   async function handleImportBackup(e) {
@@ -526,6 +559,33 @@ export default function SettingsScreen() {
         <button className={styles.btn} onClick={handleExportCSV}>
           Export Logs as CSV
         </button>
+        <div className={styles.exportPanel}>
+          <label className={styles.field}>
+            <span>Completed training block</span>
+            <select
+              className={styles.select}
+              value={selectedCompletedBlockId}
+              onChange={(e) => {
+                setSelectedCompletedBlockId(e.target.value);
+                setExportStatus('');
+              }}
+              disabled={completedBlocks.length === 0}
+            >
+              {completedBlocks.length === 0 ? (
+                <option value="">No completed blocks</option>
+              ) : completedBlocks.map(block => (
+                <option key={block.id} value={block.id}>{block.name}</option>
+              ))}
+            </select>
+          </label>
+          <p className={styles.meta}>
+            Exports planned rows with matched completed sets where the log can be tied back to the block day, exercise, and set.
+          </p>
+          <button className={styles.btn} onClick={handleCompletedBlockExport} disabled={completedBlocks.length === 0}>
+            Export Completed Block CSV
+          </button>
+          {exportStatus && <p className={styles.status}>{exportStatus}</p>}
+        </div>
       </div>
 
       <div className={styles.section}>

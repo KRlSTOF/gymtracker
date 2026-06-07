@@ -43,6 +43,11 @@
 
 .btn:active { opacity: 0.8; }
 
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .field {
   display: block;
   margin-bottom: 10px;
@@ -109,12 +114,17 @@
 }
 
 .exerciseForm,
-.backfillForm {
+.backfillForm,
+.exportPanel {
   padding: 12px;
   margin-bottom: 14px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+}
+
+.exportPanel {
+  margin-top: 10px;
 }
 
 .formTitle {

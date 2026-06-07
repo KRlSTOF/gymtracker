@@ -27,6 +27,12 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'
 const CHART_MARGIN = { top: 8, right: 8, bottom: 0, left: -16 };
 const EXERCISE_CHART_MARGIN = { top: 10, right: 18, bottom: 0, left: -8 };
 const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const ALL_MUSCLE_GROUPS = 'all';
+const PERIOD_OPTIONS = [
+  { value: '1y', label: 'Past Year', years: 1 },
+  { value: '2y', label: 'Past 2 Years', years: 2 },
+  { value: 'all', label: 'All Time', years: null }
+];
 const GRAPH_METRICS = [
   {
     value: 'estimated1RM',
@@ -94,6 +100,51 @@ function formatValue(value, unit) {
   if (!Number.isFinite(Number(value))) return '-';
   const rounded = Math.round(Number(value) * 10) / 10;
   return unit ? `${rounded.toLocaleString()} ${unit}` : rounded.toLocaleString();
+}
+
+function parseLocalDate(value) {
+  const [year, month, day] = String(value || '').split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function periodStartDate(period) {
+  const option = PERIOD_OPTIONS.find(item => item.value === period);
+  if (!option?.years) return null;
+  const start = new Date();
+  start.setFullYear(start.getFullYear() - option.years);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function filterLogsByPeriod(logs, period) {
+  const start = periodStartDate(period);
+  if (!start) return logs;
+  return logs.filter(log => {
+    const date = parseLocalDate(log.date);
+    return date && date >= start;
+  });
+}
+
+function periodLabel(period) {
+  return PERIOD_OPTIONS.find(item => item.value === period)?.label || 'Past Year';
+}
+
+function PeriodControls({ value, onChange, label = 'Period' }) {
+  return (
+    <div className={styles.periodGroup} aria-label={label}>
+      {PERIOD_OPTIONS.map(option => (
+        <button
+          key={option.value}
+          type="button"
+          className={value === option.value ? styles.activePeriod : ''}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function buildTrendData(data) {
@@ -459,12 +510,16 @@ export default function AnalyticsScreen() {
   const [logs, setLogs] = useState([]);
   const [activeTab, setActiveTab] = useState('exercise');
   const [selectedExercise, setSelectedExercise] = useState('');
+  const [exerciseSearch, setExerciseSearch] = useState('');
+  const [exercisePeriod, setExercisePeriod] = useState('1y');
   const [graphMetric, setGraphMetric] = useState('estimated1RM');
   const [selectedReps, setSelectedReps] = useState(5);
   const [showPoints, setShowPoints] = useState(true);
   const [showTrend, setShowTrend] = useState(true);
   const [yFromZero, setYFromZero] = useState(false);
   const [useRIR, setUseRIR] = useState(true);
+  const [workloadPeriod, setWorkloadPeriod] = useState('1y');
+  const [selectedMuscleGroup, setSelectedMuscleGroup] = useState(ALL_MUSCLE_GROUPS);
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState('');
@@ -483,31 +538,52 @@ export default function AnalyticsScreen() {
     [logs]
   );
 
+  const uniqueMuscleGroups = useMemo(
+    () => [...new Set(logs.map(log => log.muscleGroup || 'Uncategorized').filter(Boolean))].sort(),
+    [logs]
+  );
+
   useEffect(() => {
     if (!selectedExercise && uniqueExercises.length > 0) {
       setSelectedExercise(uniqueExercises[0]);
+      setExerciseSearch(uniqueExercises[0]);
     }
   }, [selectedExercise, uniqueExercises]);
+
+  useEffect(() => {
+    if (selectedExercise && !exerciseSearch) {
+      setExerciseSearch(selectedExercise);
+    }
+  }, [exerciseSearch, selectedExercise]);
+
+  useEffect(() => {
+    if (selectedMuscleGroup !== ALL_MUSCLE_GROUPS && !uniqueMuscleGroups.includes(selectedMuscleGroup)) {
+      setSelectedMuscleGroup(ALL_MUSCLE_GROUPS);
+    }
+  }, [selectedMuscleGroup, uniqueMuscleGroups]);
 
   const selectedMetric = GRAPH_METRICS.find(metric => metric.value === graphMetric) || GRAPH_METRICS[0];
 
   const analytics = useMemo(() => {
     const plannedSessionsPerWeek = inferPlannedSessionsPerWeek(appSettings, activeBlock);
+    const exerciseLogs = filterLogsByPeriod(logs, exercisePeriod);
+    const workloadLogs = filterLogsByPeriod(logs, workloadPeriod)
+      .filter(log => selectedMuscleGroup === ALL_MUSCLE_GROUPS || (log.muscleGroup || 'Uncategorized') === selectedMuscleGroup);
 
     return {
-      exerciseGraph: buildExerciseGraphData(logs, selectedExercise, {
+      exerciseGraph: buildExerciseGraphData(exerciseLogs, selectedExercise, {
         metric: graphMetric,
         selectedReps,
         useRIR
       }),
-      weeklyMuscleTonnage: buildWeeklyMuscleGroupTonnage(logs),
-      weeklySetDensity: buildWeeklySetDensity(logs),
-      weeklyTonnage: buildWeeklyTonnage(logs),
-      weeklyAverageRIR: buildWeeklyAverageRIR(logs),
+      weeklyMuscleTonnage: buildWeeklyMuscleGroupTonnage(workloadLogs),
+      weeklySetDensity: buildWeeklySetDensity(workloadLogs),
+      weeklyTonnage: buildWeeklyTonnage(workloadLogs),
+      weeklyAverageRIR: buildWeeklyAverageRIR(workloadLogs),
       calendarDays: buildMonthlySessionCalendar(logs, calendarMonth),
       streak: buildWeeklySessionStreak(logs, plannedSessionsPerWeek)
     };
-  }, [activeBlock, appSettings, calendarMonth, graphMetric, logs, selectedExercise, selectedReps, useRIR]);
+  }, [activeBlock, appSettings, calendarMonth, exercisePeriod, graphMetric, logs, selectedExercise, selectedMuscleGroup, selectedReps, useRIR, workloadPeriod]);
   const dateDetails = useMemo(() => buildDateDetails(logs, selectedDate), [logs, selectedDate]);
 
   useEffect(() => {
@@ -531,7 +607,7 @@ export default function AnalyticsScreen() {
             {[
               ['exercise', 'Exercise'],
               ['calendar', 'Calendar'],
-              ['weekly', 'Weekly']
+              ['weekly', 'Workload']
             ].map(([id, label]) => (
               <button
                 key={id}
@@ -549,15 +625,32 @@ export default function AnalyticsScreen() {
                 <div className={styles.controlGrid}>
                   <label>
                     <span>Selected exercise</span>
-                    <select
-                      value={selectedExercise}
-                      onChange={event => setSelectedExercise(event.target.value)}
+                    <input
                       className={styles.select}
-                    >
+                      type="search"
+                      list="analytics-exercise-options"
+                      value={exerciseSearch}
+                      onChange={event => {
+                        const nextValue = event.target.value;
+                        setExerciseSearch(nextValue);
+                        if (uniqueExercises.includes(nextValue)) {
+                          setSelectedExercise(nextValue);
+                        }
+                      }}
+                      onBlur={() => {
+                        if (uniqueExercises.includes(exerciseSearch)) {
+                          setSelectedExercise(exerciseSearch);
+                        } else {
+                          setExerciseSearch(selectedExercise);
+                        }
+                      }}
+                      placeholder="Search exercises"
+                    />
+                    <datalist id="analytics-exercise-options">
                       {uniqueExercises.map(name => (
-                        <option key={name} value={name}>{name}</option>
+                        <option key={name} value={name} />
                       ))}
-                    </select>
+                    </datalist>
                   </label>
                   <label>
                     <span>Graph type</span>
@@ -590,12 +683,13 @@ export default function AnalyticsScreen() {
                   <label><input type="checkbox" checked={yFromZero} onChange={event => setYFromZero(event.target.checked)} /> Y-axis from 0</label>
                   <label><input type="checkbox" checked={useRIR} onChange={event => setUseRIR(event.target.checked)} /> Use RIR in estimates</label>
                 </div>
+                <PeriodControls value={exercisePeriod} onChange={setExercisePeriod} label="Exercise trend period" />
               </section>
 
               <section className={styles.section}>
                 <div className={styles.sectionHeader}>
                   <h2>Exercise trend</h2>
-                  <p>{selectedMetric.description} Daily output for {selectedExercise}.</p>
+                  <p>{selectedMetric.description} Daily output for {selectedExercise} - {periodLabel(exercisePeriod)}.</p>
                 </div>
                 <div className={styles.exerciseGrid}>
                   <ExerciseGraphCard
@@ -628,8 +722,26 @@ export default function AnalyticsScreen() {
           {activeTab === 'weekly' && (
             <section className={styles.section}>
               <div className={styles.sectionHeader}>
-                <h2>Weekly workload</h2>
-                <p>Aggregated from every logged set</p>
+                <h2>Workload</h2>
+                <p>Aggregated from logged sets - {periodLabel(workloadPeriod)}.</p>
+              </div>
+              <div className={styles.selectorCard}>
+                <div className={styles.workloadControls}>
+                  <label>
+                    <span>Muscle group</span>
+                    <select
+                      value={selectedMuscleGroup}
+                      onChange={event => setSelectedMuscleGroup(event.target.value)}
+                      className={styles.select}
+                    >
+                      <option value={ALL_MUSCLE_GROUPS}>All muscle groups</option>
+                      {uniqueMuscleGroups.map(group => (
+                        <option key={group} value={group}>{group}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <PeriodControls value={workloadPeriod} onChange={setWorkloadPeriod} label="Workload period" />
+                </div>
               </div>
               <div className={styles.grid}>
                 <ChartCard title="Muscle-group tonnage" subtitle="Weekly tonnage by muscle group" data={analytics.weeklyMuscleTonnage} xKey="week" />

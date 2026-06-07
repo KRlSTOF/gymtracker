@@ -236,6 +236,10 @@ export default function ExerciseSession() {
       muscleGroup: exercise.muscleGroup,
       date: localDateKey(),
       dayId,
+      dayName: currentSession?.dayName || day?.name || '',
+      blockId: currentSession?.blockId || activeBlock?.id || '',
+      blockName: currentSession?.blockName || activeBlock?.name || '',
+      sessionSource: currentSession?.source || 'plan',
       exerciseIndex: exIdx,
       setNumber: currentSet,
       weight,
@@ -316,6 +320,10 @@ export default function ExerciseSession() {
 
   function adjustReps(delta) {
     setReps(prev => Math.max(0, prev + delta));
+  }
+
+  function finishWorkout() {
+    navigate(`/summary/${currentSession?.dayId ?? dayId}`);
   }
 
   return (
@@ -537,6 +545,11 @@ export default function ExerciseSession() {
         ) : (
           <button className={styles.confirmBtn} onClick={() => navigate('/')}>
             Back to workout
+          </button>
+        )}
+        {currentSession?.sessionExercises && (
+          <button className={styles.finishBtn} type="button" onClick={finishWorkout}>
+            {currentSession.source === 'ad_hoc' ? 'Finish Extra Session' : 'Finish Workout'}
           </button>
         )}
       </div>

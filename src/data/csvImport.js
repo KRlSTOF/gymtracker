@@ -15,6 +15,13 @@ function parseInteger(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function round(value, decimals = 1) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return '';
+  const multiplier = 10 ** decimals;
+  return Math.round(parsed * multiplier) / multiplier;
+}
+
 function firstSetTarget(exercise) {
   const first = Array.isArray(exercise.sets) ? exercise.sets[0] : null;
   return {
@@ -174,6 +181,126 @@ export function exportBlockAsCSV(block) {
           target_weight: set.targetWeight ?? ex.targetWeight,
           target_rir: set.targetRIR ?? ex.targetRIR,
           notes: ex.notes || ex.note || ''
+        });
+      });
+    });
+  });
+
+  return Papa.unparse(rows);
+}
+
+export function exportCompletedBlockAsCSV(block, logs = []) {
+  const usedLogIds = new Set();
+  const logsWithBlockId = logs.filter(log => String(log?.blockId || '') === String(block?.id || ''));
+  const sourceLogs = logsWithBlockId.length > 0 ? logsWithBlockId : logs;
+  const blockLogs = sourceLogs
+    .filter(log => log?.date && log?.exerciseName)
+    .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+
+  function logKey(dayIndex, exerciseIndex, exerciseName, setNumber) {
+    return [
+      String(dayIndex),
+      String(exerciseIndex),
+      String(exerciseName || '').trim().toLowerCase(),
+      String(setNumber)
+    ].join('|');
+  }
+
+  function fallbackKey(dayIndex, exerciseIndex, setNumber) {
+    return [String(dayIndex), String(exerciseIndex), String(setNumber)].join('|');
+  }
+
+  const exactLogs = new Map();
+  const fallbackLogs = new Map();
+
+  blockLogs.forEach(log => {
+    const dayIndex = parseInteger(log.dayId, -1);
+    const exerciseIndex = parseInteger(log.exerciseIndex, -1);
+    const setNumber = parseInteger(log.setNumber, -1);
+    if (dayIndex < 0 || exerciseIndex < 0 || setNumber < 1) return;
+
+    const exact = logKey(dayIndex, exerciseIndex, log.exerciseName, setNumber);
+    const fallback = fallbackKey(dayIndex, exerciseIndex, setNumber);
+    if (!exactLogs.has(exact)) exactLogs.set(exact, []);
+    if (!fallbackLogs.has(fallback)) fallbackLogs.set(fallback, []);
+    exactLogs.get(exact).push(log);
+    fallbackLogs.get(fallback).push(log);
+  });
+
+  function findMatchingLog(dayIndex, exerciseIndex, exerciseName, setNumber) {
+    const exactCandidates = exactLogs.get(logKey(dayIndex, exerciseIndex, exerciseName, setNumber)) || [];
+    const exact = exactCandidates.find(log => !usedLogIds.has(log.id));
+    if (exact) {
+      usedLogIds.add(exact.id);
+      return { log: exact, matchMethod: 'day_exercise_name_set' };
+    }
+
+    const fallbackCandidates = fallbackLogs.get(fallbackKey(dayIndex, exerciseIndex, setNumber)) || [];
+    const fallback = fallbackCandidates.find(log => !usedLogIds.has(log.id));
+    if (fallback) {
+      usedLogIds.add(fallback.id);
+      return { log: fallback, matchMethod: 'day_exercise_index_set' };
+    }
+
+    return { log: null, matchMethod: 'planned_only' };
+  }
+
+  const rows = [];
+  (block.days || []).forEach((day, dayIndex) => {
+    (day.exercises || []).forEach((exercise, exerciseIndex) => {
+      const setTargets = Array.isArray(exercise.sets) && exercise.sets.length > 0
+        ? exercise.sets
+        : Array.from({ length: Number(exercise.targetSets) || 1 }, (_, index) => ({
+            setNumber: index + 1,
+            targetReps: exercise.targetReps,
+            targetWeight: exercise.targetWeight,
+            targetRIR: exercise.targetRIR
+          }));
+
+      setTargets.forEach((set, setIndex) => {
+        const plannedSetNumber = parseInteger(set.setNumber, setIndex + 1);
+        const targetWeight = parseNumber(set.targetWeight ?? exercise.targetWeight, 0);
+        const targetReps = parseInteger(set.targetReps ?? exercise.targetReps, 0);
+        const targetRIR = set.targetRIR ?? exercise.targetRIR ?? '';
+        const { log, matchMethod } = findMatchingLog(dayIndex, exerciseIndex, exercise.name, plannedSetNumber);
+        const actualWeight = log ? parseNumber(log.weight, 0) : '';
+        const actualReps = log ? parseInteger(log.reps, 0) : '';
+        const actualRIR = log?.rir ?? '';
+
+        rows.push({
+          block_id: block.id ?? '',
+          block_name: block.name || '',
+          block_created_at: block.createdAt || '',
+          block_completed: (Number(block.currentDayIndex) || 0) >= (block.days || []).length,
+          week: day.week || Math.floor(dayIndex / (block.daysPerWeek || 7)) + 1,
+          day: day.dayNum || (dayIndex % (block.daysPerWeek || 7)) + 1,
+          day_index: dayIndex,
+          day_name: day.name || '',
+          deload: Boolean(day.isDeload),
+          exercise_index: exerciseIndex,
+          exercise_name: exercise.name || '',
+          muscle_group: exercise.muscleGroup || '',
+          planned_set_number: plannedSetNumber,
+          target_reps: targetReps,
+          target_weight: targetWeight,
+          target_rir: targetRIR,
+          actual_date: log?.date || '',
+          session_id: log?.sessionId || '',
+          session_exercise_id: log?.sessionExerciseId || '',
+          actual_set_number: log?.setNumber || '',
+          actual_weight: actualWeight,
+          actual_reps: actualReps,
+          actual_rir: actualRIR,
+          volume: log ? round(actualWeight * actualReps) : '',
+          weight_delta: log ? round(actualWeight - targetWeight) : '',
+          reps_delta: log ? actualReps - targetReps : '',
+          rir_delta: log && actualRIR !== '' && targetRIR !== '' ? round(parseNumber(actualRIR, 0) - parseNumber(targetRIR, 0)) : '',
+          completed: Boolean(log),
+          compromised_form: Boolean(log?.compromisedForm),
+          switched_from: log?.switchedFrom || '',
+          notes: log?.note || log?.exerciseNote || exercise.notes || exercise.note || '',
+          match_method: matchMethod,
+          log_id: log?.id || ''
         });
       });
     });
