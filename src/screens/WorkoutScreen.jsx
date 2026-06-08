@@ -21,6 +21,11 @@ function numberOrFallback(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function optionalNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function resolveTargetSets(exercise) {
   if (Array.isArray(exercise.sets) && exercise.sets.length > 0) return exercise.sets;
   if (Array.isArray(exercise.setTargets) && exercise.setTargets.length > 0) return exercise.setTargets;
@@ -100,8 +105,8 @@ function snapshotExercise(exercise, overrides = {}) {
       targetWeight: numberOrFallback(set.targetWeight ?? set.weight, 0),
       targetRIR: normalizeRIROption(set.targetRIR ?? set.rir, '2')
     })),
-    weightStep: Number(exercise.weightStep) || undefined,
-    restTimer: Number(exercise.restTimer) || undefined,
+    weightStep: optionalNumber(exercise.weightStep),
+    restTimer: optionalNumber(exercise.restTimer),
     note: exercise.note || exercise.notes || '',
     baseExerciseName: overrides.baseExerciseName || exercise.baseExerciseName || exercise.name,
     switchedFrom: overrides.switchedFrom,
@@ -133,6 +138,20 @@ export default function WorkoutScreen() {
     .filter(ex => `${ex.name} ${ex.muscleGroup || ''}`.toLowerCase().includes(exerciseQuery.trim().toLowerCase()))
     .sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || a.name.localeCompare(b.name));
   const historySessions = buildHistorySessions(historyLogs);
+
+  function withLibraryTiming(exercise) {
+    const libraryExercise = exercises.find(item => (
+      exercise.libraryId
+        ? String(item.id) === String(exercise.libraryId)
+        : String(item.name || '').trim().toLowerCase() === String(exercise.name || '').trim().toLowerCase()
+    ));
+
+    return {
+      ...exercise,
+      weightStep: exercise.weightStep ?? libraryExercise?.weightStep,
+      restTimer: exercise.restTimer ?? libraryExercise?.restTimer
+    };
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -171,7 +190,7 @@ export default function WorkoutScreen() {
       blockName: activeBlock.name,
       sessionStart: Date.now(),
       sessionLogs: [],
-      sessionExercises: nextDay.exercises.map((ex, index) => snapshotExercise(ex, {
+      sessionExercises: nextDay.exercises.map((ex, index) => snapshotExercise(withLibraryTiming(ex), {
         sourceExerciseIndex: index,
         sessionExerciseId: `planned-${nextDay.index}-${index}-${Date.now()}`
       }))
@@ -209,7 +228,7 @@ export default function WorkoutScreen() {
       blockName: activeBlock?.name,
       sessionStart: Date.now(),
       sessionLogs: [],
-      sessionExercises: activeBlock && nextDay ? nextDay.exercises.map((ex, index) => snapshotExercise(ex, { sourceExerciseIndex: index })) : []
+      sessionExercises: activeBlock && nextDay ? nextDay.exercises.map((ex, index) => snapshotExercise(withLibraryTiming(ex), { sourceExerciseIndex: index })) : []
     };
     const targetWeight = exercise.targetWeight ?? 0;
     const nextExercise = snapshotExercise({
@@ -219,7 +238,7 @@ export default function WorkoutScreen() {
       targetReps: 10,
       targetRIR: '2',
       weightStep: exercise.weightStep || appSettings.defaultWeightStep,
-      restTimer: exercise.restTimer || appSettings.defaultRestTimer
+      restTimer: exercise.restTimer ?? appSettings.defaultRestTimer
     }, { isAdHoc: true });
 
     setCurrentSession({
@@ -389,8 +408,8 @@ export default function WorkoutScreen() {
         targetReps: item.targetReps,
         targetWeight: item.targetWeight,
         targetRIR: item.targetRIR,
-        weightStep: replacement.weightStep || item.weightStep,
-        restTimer: replacement.restTimer || item.restTimer
+        weightStep: replacement.weightStep ?? item.weightStep,
+        restTimer: replacement.restTimer ?? item.restTimer
       }, {
         sessionExerciseId: item.sessionExerciseId,
         sourceExerciseIndex: item.sourceExerciseIndex,

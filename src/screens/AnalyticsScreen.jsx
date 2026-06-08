@@ -523,6 +523,7 @@ export default function AnalyticsScreen() {
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState('');
+  const [hasInitializedExerciseSelection, setHasInitializedExerciseSelection] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -544,17 +545,12 @@ export default function AnalyticsScreen() {
   );
 
   useEffect(() => {
-    if (!selectedExercise && uniqueExercises.length > 0) {
+    if (!hasInitializedExerciseSelection && uniqueExercises.length > 0) {
       setSelectedExercise(uniqueExercises[0]);
       setExerciseSearch(uniqueExercises[0]);
+      setHasInitializedExerciseSelection(true);
     }
-  }, [selectedExercise, uniqueExercises]);
-
-  useEffect(() => {
-    if (selectedExercise && !exerciseSearch) {
-      setExerciseSearch(selectedExercise);
-    }
-  }, [exerciseSearch, selectedExercise]);
+  }, [hasInitializedExerciseSelection, uniqueExercises]);
 
   useEffect(() => {
     if (selectedMuscleGroup !== ALL_MUSCLE_GROUPS && !uniqueMuscleGroups.includes(selectedMuscleGroup)) {
@@ -630,18 +626,25 @@ export default function AnalyticsScreen() {
                       type="search"
                       list="analytics-exercise-options"
                       value={exerciseSearch}
+                      onFocus={event => event.currentTarget.select()}
                       onChange={event => {
                         const nextValue = event.target.value;
                         setExerciseSearch(nextValue);
+                        if (!nextValue) {
+                          setSelectedExercise('');
+                          return;
+                        }
                         if (uniqueExercises.includes(nextValue)) {
                           setSelectedExercise(nextValue);
                         }
                       }}
                       onBlur={() => {
+                        if (!exerciseSearch) {
+                          setSelectedExercise('');
+                          return;
+                        }
                         if (uniqueExercises.includes(exerciseSearch)) {
                           setSelectedExercise(exerciseSearch);
-                        } else {
-                          setExerciseSearch(selectedExercise);
                         }
                       }}
                       placeholder="Search exercises"

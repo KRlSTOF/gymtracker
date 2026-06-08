@@ -42,7 +42,9 @@ export function AppProvider({ children }) {
 
   // Refresh exercises
   async function refreshExercises() {
-    setExercises(await db.getAllExercises());
+    const nextExercises = await db.getAllExercises();
+    setExercises(nextExercises);
+    setCurrentSession(prev => reconcileSessionExerciseSettings(prev, nextExercises));
   }
 
   // Refresh blocks
@@ -119,5 +121,43 @@ function normalizeSettings(settings = {}) {
   return {
     defaultRestTimer: Number(settings.defaultRestTimer) || DEFAULT_APP_SETTINGS.defaultRestTimer,
     defaultWeightStep: Number(settings.defaultWeightStep) || DEFAULT_APP_SETTINGS.defaultWeightStep
+  };
+}
+
+function reconcileSessionExerciseSettings(session, exercises = []) {
+  if (!session?.sessionExercises?.length) return session;
+
+  const byId = new Map(exercises.map(exercise => [String(exercise.id), exercise]));
+  let changed = false;
+  const sessionExercises = session.sessionExercises.map(sessionExercise => {
+    const libraryExercise = sessionExercise.libraryId ? byId.get(String(sessionExercise.libraryId)) : null;
+    if (!libraryExercise) return sessionExercise;
+
+    const libraryRestTimer = Number(libraryExercise.restTimer);
+    const libraryWeightStep = Number(libraryExercise.weightStep);
+    const nextRestTimer = Number.isFinite(libraryRestTimer) ? libraryRestTimer : sessionExercise.restTimer;
+    const nextWeightStep = Number.isFinite(libraryWeightStep) ? libraryWeightStep : sessionExercise.weightStep;
+    if (nextRestTimer === sessionExercise.restTimer && nextWeightStep === sessionExercise.weightStep) {
+      return sessionExercise;
+    }
+
+    changed = true;
+    return {
+      ...sessionExercise,
+      restTimer: nextRestTimer,
+      weightStep: nextWeightStep
+    };
+  });
+
+  if (!changed) return session;
+
+  const exercise = session.exercise?.sessionExerciseId
+    ? sessionExercises.find(item => item.sessionExerciseId === session.exercise.sessionExerciseId) || session.exercise
+    : session.exercise;
+
+  return {
+    ...session,
+    sessionExercises,
+    exercise
   };
 }

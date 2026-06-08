@@ -11,7 +11,7 @@ export default function TimerScreen() {
   const intervalRef = useRef(null);
 
   const exercise = currentSession?.exercise;
-  const restDuration = exercise?.restTimer || appSettings.defaultRestTimer || 120;
+  const restDuration = exercise?.restTimer ?? appSettings.defaultRestTimer ?? 120;
 
   useEffect(() => {
     setTimeLeft(restDuration);
