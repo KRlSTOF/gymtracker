@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
 import { addBlock, addExercise as addLibraryExercise, deleteBlock, updateBlock } from '../data/db.js';
-import { parseBlockCSV } from '../data/csvImport.js';
+import { RIR_OPTIONS, normalizeRIROption, parseBlockCSV } from '../data/csvImport.js';
 import styles from './PlannerScreen.module.css';
 
 const EMPTY_EXERCISE = {
@@ -96,19 +96,22 @@ function makeDay(index = 0) {
 function normalizeExercise(exercise = {}) {
   const note = String(exercise.note ?? exercise.notes ?? '');
   const legacySets = Number(exercise.targetSets) || 1;
-  const sets = Array.isArray(exercise.sets) && exercise.sets.length > 0
-    ? exercise.sets
-    : Array.from({ length: legacySets }, (_, index) => ({
+  const sourceSets =
+    Array.isArray(exercise.sets) && exercise.sets.length > 0 ? exercise.sets :
+    Array.isArray(exercise.setTargets) && exercise.setTargets.length > 0 ? exercise.setTargets :
+    Array.isArray(exercise.targets) && exercise.targets.length > 0 ? exercise.targets :
+    null;
+  const sets = sourceSets || Array.from({ length: legacySets }, (_, index) => ({
         setNumber: index + 1,
-        targetReps: exercise.targetReps ?? 10,
-        targetWeight: exercise.targetWeight ?? 0,
-        targetRIR: exercise.targetRIR ?? '2'
+        targetReps: exercise.targetReps ?? exercise.reps ?? 10,
+        targetWeight: exercise.targetWeight ?? exercise.weight ?? 0,
+        targetRIR: exercise.targetRIR ?? exercise.rir ?? '2'
       }));
   const normalizedSets = sets.map((set, index) => ({
     setNumber: toInt(set.setNumber, index + 1),
     targetReps: toInt(set.targetReps ?? set.reps, 10),
     targetWeight: toNumber(set.targetWeight ?? set.weight, 0),
-    targetRIR: String(set.targetRIR ?? set.rir ?? '2')
+    targetRIR: normalizeRIROption(set.targetRIR ?? set.rir, '2')
   })).sort((a, b) => a.setNumber - b.setNumber);
   const firstSet = normalizedSets[0] || EMPTY_EXERCISE.sets[0];
 
@@ -170,12 +173,12 @@ function sanitizeBlockForSave(block) {
           targetSets: Math.max(1, toInt(exercise.targetSets, 1)),
           targetReps: Math.max(0, toInt(exercise.targetReps, 0)),
           targetWeight: Math.max(0, toNumber(exercise.targetWeight, 0)),
-          targetRIR: String(exercise.targetRIR ?? '').trim(),
+          targetRIR: normalizeRIROption(exercise.targetRIR, '2'),
           sets: exercise.sets.map((set, setIndex) => ({
             setNumber: setIndex + 1,
             targetReps: Math.max(0, toInt(set.targetReps, 0)),
             targetWeight: Math.max(0, toNumber(set.targetWeight, 0)),
-            targetRIR: String(set.targetRIR ?? '').trim()
+            targetRIR: normalizeRIROption(set.targetRIR, '2')
           })),
           note: note.trim(),
           notes: note.trim()
@@ -409,7 +412,15 @@ export default function PlannerScreen() {
             const sets = exercise.sets.map((set, currentSetIndex) => (
               currentSetIndex === setIndex ? { ...set, [field]: value } : set
             ));
-            return normalizeExercise({ ...exercise, sets });
+            const firstSet = sets[0] || {};
+            return {
+              ...exercise,
+              targetSets: sets.length,
+              targetReps: firstSet.targetReps ?? exercise.targetReps,
+              targetWeight: firstSet.targetWeight ?? exercise.targetWeight,
+              targetRIR: firstSet.targetRIR ?? exercise.targetRIR,
+              sets
+            };
           })
         };
       })
@@ -949,11 +960,15 @@ export default function PlannerScreen() {
                                     </label>
                                     <label>
                                       <span>RIR</span>
-                                      <input
+                                      <select
                                         value={set.targetRIR}
                                         onChange={e => updateSetField(block.id, selectedDayIndex, exerciseIndex, setIndex, 'targetRIR', e.target.value)}
                                         onBlur={() => persistDraft(block.id)}
-                                      />
+                                      >
+                                        {RIR_OPTIONS.map(option => (
+                                          <option key={option} value={option}>{option}</option>
+                                        ))}
+                                      </select>
                                     </label>
                                     <button
                                       type="button"
@@ -962,7 +977,7 @@ export default function PlannerScreen() {
                                       disabled={exercise.sets.length === 1}
                                       aria-label={`Remove set ${setIndex + 1}`}
                                     >
-                                      x
+                                      &times;
                                     </button>
                                   </div>
                                 ))}

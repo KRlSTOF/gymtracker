@@ -57,6 +57,34 @@
   font-weight: 700;
 }
 
+.dateControl {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  max-width: 220px;
+  margin: 14px auto 0;
+  text-align: left;
+}
+
+.dateControl span {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dateControl input {
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
 .progressRail {
   height: 5px;
   overflow: hidden;
@@ -181,6 +209,9 @@
   position: absolute;
   top: -10px;
   z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 30px;
   height: 30px;
   border: 1px solid rgba(248, 113, 113, 0.32);
@@ -188,6 +219,7 @@
   background: var(--bg-dark);
   color: var(--danger);
   font-size: 0;
+  line-height: 1;
   cursor: pointer;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
 }
@@ -197,8 +229,9 @@
 }
 
 .cornerRemoveBtn::before {
-  content: "x";
-  font-size: 14px;
+  content: "\00d7";
+  font-size: 18px;
+  line-height: 1;
   font-weight: 800;
 }
 
@@ -344,4 +377,116 @@
   font-size: 14px;
   font-weight: 800;
   cursor: pointer;
+}
+
+.historyList {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.historySession {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+.historySessionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.historySessionHeader h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.historySessionHeader p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.historySessionHeader span {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.historyExercise {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.historySets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.historySets span {
+  padding: 5px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.confirmOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.confirmDialog {
+  width: 100%;
+  max-width: 360px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+}
+
+.confirmDialog h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.confirmDialog p {
+  margin: 0 0 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.confirmActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.confirmActions .finishBtn {
+  margin: 0;
 }

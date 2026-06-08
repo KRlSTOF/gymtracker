@@ -3,9 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext.jsx';
 import { getLogsByExercise, getHistoryByExercise, getAllLogs, addLog, updateExercise, getExerciseByName } from '../data/db.js';
 import { findReference } from '../data/calculations.js';
+import { RIR_OPTIONS, normalizeRIROption } from '../data/csvImport.js';
 import styles from './ExerciseSession.module.css';
-
-const RIR_OPTIONS = ['0', '1', '1-2', '2', '2-3', '3', '3-4'];
 
 function localDateKey(date = new Date()) {
   const year = date.getFullYear();
@@ -58,9 +57,9 @@ export default function ExerciseSession() {
     : [];
 
   const [completedSets, setCompletedSets] = useState(priorExerciseSets);
-  const [weight, setWeight] = useState(exercise?.targetWeight || 0);
-  const [reps, setReps] = useState(exercise?.targetReps || 10);
-  const [rir, setRIR] = useState(exercise?.targetRIR || '2');
+  const [weight, setWeight] = useState(String(exercise?.targetWeight ?? 0));
+  const [reps, setReps] = useState(String(exercise?.targetReps ?? 10));
+  const [rir, setRIR] = useState(normalizeRIROption(exercise?.targetRIR, '2'));
   const [exerciseNote, setExerciseNote] = useState('');
   const [notesOpen, setNotesOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -74,6 +73,10 @@ export default function ExerciseSession() {
   const currentSet = completedSets.length + 1;
   const totalSets = exercise?.targetSets || 3;
   const weightStep = exercise?.weightStep || libraryExercise?.weightStep || appSettings.defaultWeightStep || 2.5;
+
+  useEffect(() => {
+    setCompletedSets(priorExerciseSets);
+  }, [dayId, exerciseIndex, exercise?.sessionExerciseId, currentSession?.sessionLogs?.length]);
 
   useEffect(() => {
     async function loadReferenceAndNotes() {
@@ -114,6 +117,7 @@ export default function ExerciseSession() {
             reps: log.reps,
             rir: log.rir,
             text: cleanPastNoteText(log.exerciseNote || log.note),
+            switchedFrom: log.switchedFrom || '',
             source: 'Workout'
           })),
         ...history
@@ -146,9 +150,9 @@ export default function ExerciseSession() {
   useEffect(() => {
     if (exercise) {
       const target = getSetTarget(completedSets.length + 1);
-      setWeight(target.weight);
-      setReps(target.reps);
-      setRIR(target.rir);
+      setWeight(String(target.weight ?? ''));
+      setReps(String(target.reps ?? ''));
+      setRIR(normalizeRIROption(target.rir, '2'));
       setExerciseNote('');
       setNotesOpen(false);
       setHistoryOpen(false);
@@ -191,15 +195,15 @@ export default function ExerciseSession() {
       setNumber,
       weight: target?.targetWeight ?? target?.weight ?? exercise.targetWeight,
       reps: target?.targetReps ?? target?.reps ?? exercise.targetReps,
-      rir: target?.targetRIR ?? target?.rir ?? exercise.targetRIR
+      rir: normalizeRIROption(target?.targetRIR ?? target?.rir ?? exercise.targetRIR, '2')
     };
   }
 
   function quickFillFromLast() {
     if (!lastReference) return;
-    setWeight(Number(lastReference.weight) || 0);
-    setReps(Number(lastReference.reps) || 0);
-    setRIR(lastReference.rir || exercise.targetRIR || '2');
+    setWeight(String(Number(lastReference.weight) || 0));
+    setReps(String(Number(lastReference.reps) || 0));
+    setRIR(normalizeRIROption(lastReference.rir || exercise.targetRIR, '2'));
   }
 
   async function saveExerciseNote() {
@@ -227,6 +231,9 @@ export default function ExerciseSession() {
   async function confirmSet() {
     const previousSessionLogs = currentSession?.sessionLogs || [];
     const sessionExerciseId = exercise.sessionExerciseId || `legacy-${dayIdx}-${exIdx}`;
+    const loggedWeight = parseFloat(weight) || 0;
+    const loggedReps = parseInt(reps, 10) || 0;
+    const loggedRIR = normalizeRIROption(rir, '2');
 
     const setData = {
       sessionId,
@@ -241,16 +248,20 @@ export default function ExerciseSession() {
       blockName: currentSession?.blockName || activeBlock?.name || '',
       sessionSource: currentSession?.source || 'plan',
       exerciseIndex: exIdx,
+      sourceExerciseIndex: exercise.sourceExerciseIndex,
       setNumber: currentSet,
-      weight,
-      reps,
-      rir,
+      weight: loggedWeight,
+      reps: loggedReps,
+      rir: loggedRIR,
       note: exerciseNote.trim(),
       exerciseNote: exerciseNote.trim(),
       compromisedForm,
       targetWeight: currentTarget.weight,
       targetReps: currentTarget.reps,
       targetRIR: currentTarget.rir,
+      switchedFrom: exercise.switchedFrom || '',
+      baseExerciseName: exercise.baseExerciseName || exercise.name,
+      plannedExerciseName: exercise.switchedFrom || exercise.baseExerciseName || exercise.name,
       timestamp: Date.now()
     };
 
@@ -309,21 +320,17 @@ export default function ExerciseSession() {
         };
       })
     });
-    setWeight(nextSet.targetWeight);
-    setReps(nextSet.targetReps);
-    setRIR(nextSet.targetRIR);
+    setWeight(String(nextSet.targetWeight ?? ''));
+    setReps(String(nextSet.targetReps ?? ''));
+    setRIR(normalizeRIROption(nextSet.targetRIR, '2'));
   }
 
   function adjustWeight(delta) {
-    setWeight(prev => Math.max(0, +(prev + delta * weightStep).toFixed(1)));
+    setWeight(prev => String(Math.max(0, +(Number(prev || 0) + delta * weightStep).toFixed(1))));
   }
 
   function adjustReps(delta) {
-    setReps(prev => Math.max(0, prev + delta));
-  }
-
-  function finishWorkout() {
-    navigate(`/summary/${currentSession?.dayId ?? dayId}`);
+    setReps(prev => String(Math.max(0, Number(prev || 0) + delta)));
   }
 
   return (
@@ -436,6 +443,7 @@ export default function ExerciseSession() {
                       <span>Set {item.setNumber ?? '?'}</span>
                       <span>{item.weight ?? '?'} kg x {item.reps ?? '?'}</span>
                       <span>RIR {item.rir || '?'}</span>
+                      {item.switchedFrom && <span>Switched from {item.switchedFrom}</span>}
                     </div>
                     <p>{item.text}</p>
                   </div>
@@ -470,7 +478,7 @@ export default function ExerciseSession() {
                     type="number"
                     inputMode="decimal"
                     value={weight}
-                    onChange={e => setWeight(parseFloat(e.target.value) || 0)}
+                    onChange={e => setWeight(e.target.value)}
                   />
                   <button onClick={() => adjustWeight(1)}>+</button>
                 </div>
@@ -483,7 +491,7 @@ export default function ExerciseSession() {
                     type="number"
                     inputMode="numeric"
                     value={reps}
-                    onChange={e => setReps(parseInt(e.target.value) || 0)}
+                    onChange={e => setReps(e.target.value)}
                   />
                   <button onClick={() => adjustReps(1)}>+</button>
                 </div>
@@ -545,11 +553,6 @@ export default function ExerciseSession() {
         ) : (
           <button className={styles.confirmBtn} onClick={() => navigate('/')}>
             Back to workout
-          </button>
-        )}
-        {currentSession?.sessionExercises && (
-          <button className={styles.finishBtn} type="button" onClick={finishWorkout}>
-            {currentSession.source === 'ad_hoc' ? 'Finish Extra Session' : 'Finish Workout'}
           </button>
         )}
       </div>

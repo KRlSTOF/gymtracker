@@ -638,7 +638,8 @@
   text-transform: uppercase;
 }
 
-.setRow input {
+.setRow input,
+.setRow select {
   width: 100%;
   min-width: 0;
   height: 40px;
@@ -651,9 +652,13 @@
 }
 
 .setRemoveBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 32px;
   padding: 0;
   color: var(--danger);
+  line-height: 1;
 }
 
 .setRemoveBtn:disabled {

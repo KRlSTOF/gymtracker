@@ -37,7 +37,8 @@ export default function SessionSummary() {
       const seenNotes = new Set();
       const notes = sessionLogs.filter(l => l.exerciseNote || l.note).map(l => ({
         exercise: l.exerciseName,
-        note: l.exerciseNote || l.note
+        note: l.exerciseNote || l.note,
+        switchedFrom: l.switchedFrom || ''
       })).filter(item => {
         const key = `${item.exercise}-${item.note}`;
         if (seenNotes.has(key)) return false;
@@ -152,6 +153,7 @@ export default function SessionSummary() {
               {summary.notes.map((n, i) => (
                 <div key={i} className={styles.noteItem}>
                   <span className={styles.statLabel}>{n.exercise}</span>
+                  {n.switchedFrom && <span className={styles.statLabel}>Switched from {n.switchedFrom}</span>}
                   <p>{n.note}</p>
                 </div>
               ))}

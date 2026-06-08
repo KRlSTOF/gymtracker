@@ -5,6 +5,17 @@ function cleanText(value) {
   return String(value ?? '').trim().replace(/^"|"$/g, '');
 }
 
+export const RIR_OPTIONS = ['0', '1', '1-2', '2', '2-3', '3', '3-4'];
+
+export function normalizeRIROption(value, fallback = '2') {
+  const cleaned = cleanText(value)
+    .replace(/^RIR\s*/i, '')
+    .replace(/[–—]/g, '-')
+    .replace(/\s*-\s*/g, '-');
+  const normalized = cleaned.replace(/\.0\b/g, '');
+  return RIR_OPTIONS.includes(normalized) ? normalized : fallback;
+}
+
 function parseNumber(value, fallback = 0) {
   const parsed = parseFloat(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -33,7 +44,7 @@ function firstSetTarget(exercise) {
 
 function parseRIRFromComment(comment) {
   const match = cleanText(comment).match(/\bRIR\s+([^|,;]+)/i);
-  return match ? match[1].trim() : '';
+  return match ? normalizeRIROption(match[1], '') : '';
 }
 
 function parseFitNotesRow(row) {
@@ -61,7 +72,7 @@ function parseNormalizedHistoryRow(row) {
     weight: parseNumber(row.weight),
     weightUnit: 'kgs',
     reps: parseInteger(row.reps),
-    rir: cleanText(row.rir),
+    rir: normalizeRIROption(row.rir, ''),
     comment: notes,
     note: notes,
     notes
@@ -133,7 +144,8 @@ export function exportAsCSV(logs, exercises) {
   const rows = logs.map(log => {
     const exercise = exercises.find(e => e.id === log.exerciseId);
     const comments = [];
-    if (log.rir) comments.push(`RIR ${log.rir}`);
+    if (log.rir) comments.push(`RIR ${normalizeRIROption(log.rir, log.rir)}`);
+    if (log.switchedFrom) comments.push(`Switched from ${log.switchedFrom}`);
     if (log.compromisedForm) comments.push('Form compromised');
     if (log.note) comments.push(log.note);
 
@@ -215,7 +227,7 @@ export function exportCompletedBlockAsCSV(block, logs = []) {
 
   blockLogs.forEach(log => {
     const dayIndex = parseInteger(log.dayId, -1);
-    const exerciseIndex = parseInteger(log.exerciseIndex, -1);
+    const exerciseIndex = parseInteger(log.sourceExerciseIndex ?? log.exerciseIndex, -1);
     const setNumber = parseInteger(log.setNumber, -1);
     if (dayIndex < 0 || exerciseIndex < 0 || setNumber < 1) return;
 
@@ -335,10 +347,10 @@ export function parseBlockCSV(file) {
           const exerciseName = row.exercise_name.trim();
           const existing = day.exercises.find(exercise => exercise.name.toLowerCase() === exerciseName.toLowerCase());
           const setTarget = {
-            setNumber: parseInteger(row.set_number, existing ? existing.sets.length + 1 : 1),
-            targetReps: parseInteger(row.target_reps, 10),
-            targetWeight: parseNumber(row.target_weight, 0),
-            targetRIR: row.target_rir?.trim() || '2'
+            setNumber: parseInteger(row.set_number ?? row.setNumber, existing ? existing.sets.length + 1 : 1),
+            targetReps: parseInteger(row.target_reps ?? row.targetReps ?? row.reps, 10),
+            targetWeight: parseNumber(row.target_weight ?? row.targetWeight ?? row.weight, 0),
+            targetRIR: normalizeRIROption(row.target_rir ?? row.targetRIR ?? row.rir, '2')
           };
 
           if (existing) {
@@ -350,7 +362,7 @@ export function parseBlockCSV(file) {
             day.exercises.push({
               name: exerciseName,
               muscleGroup: row.muscle_group?.trim() || '',
-              targetSets: parseInteger(row.target_sets, 1),
+              targetSets: parseInteger(row.target_sets ?? row.targetSets, 1),
               targetReps: setTarget.targetReps,
               targetWeight: setTarget.targetWeight,
               targetRIR: setTarget.targetRIR,

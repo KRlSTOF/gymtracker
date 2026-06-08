@@ -1,21 +1,87 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext.jsx';
+import { getLogsByDate } from '../data/db.js';
+import { normalizeRIROption } from '../data/csvImport.js';
 import styles from './WorkoutScreen.module.css';
 
 function makeSessionId() {
   return `session-${Date.now()}`;
 }
 
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function numberOrFallback(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function resolveTargetSets(exercise) {
+  if (Array.isArray(exercise.sets) && exercise.sets.length > 0) return exercise.sets;
+  if (Array.isArray(exercise.setTargets) && exercise.setTargets.length > 0) return exercise.setTargets;
+  if (Array.isArray(exercise.targets) && exercise.targets.length > 0) return exercise.targets;
+
+  return Array.from({ length: Number(exercise.targetSets) || 1 }, (_, index) => ({
+    setNumber: index + 1,
+    targetReps: exercise.targetReps ?? exercise.reps ?? 10,
+    targetWeight: exercise.targetWeight ?? exercise.weight ?? 0,
+    targetRIR: exercise.targetRIR ?? exercise.rir ?? '2'
+  }));
+}
+
+function buildHistorySessions(logs = []) {
+  const sessions = new Map();
+  logs
+    .slice()
+    .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
+    .forEach(log => {
+      const sessionId = log.sessionId || `date-${log.date || 'unknown'}`;
+      if (!sessions.has(sessionId)) {
+        sessions.set(sessionId, {
+          sessionId,
+          title: log.dayName || log.blockName || 'Workout',
+          source: log.sessionSource || '',
+          exercises: new Map(),
+          volume: 0,
+          sets: 0
+        });
+      }
+
+      const session = sessions.get(sessionId);
+      const exerciseKey = log.sessionExerciseId || log.exerciseName || `exercise-${session.exercises.size}`;
+      if (!session.exercises.has(exerciseKey)) {
+        session.exercises.set(exerciseKey, {
+          name: log.exerciseName || 'Exercise',
+          muscleGroup: log.muscleGroup || 'Uncategorized',
+          switchedFrom: log.switchedFrom || '',
+          sets: [],
+          volume: 0
+        });
+      }
+
+      const exercise = session.exercises.get(exerciseKey);
+      const weight = numberOrFallback(log.weight, 0);
+      const reps = numberOrFallback(log.reps, 0);
+      const volume = weight * reps;
+      exercise.sets.push(log);
+      exercise.volume += volume;
+      session.volume += volume;
+      session.sets += 1;
+    });
+
+  return Array.from(sessions.values()).map(session => ({
+    ...session,
+    exercises: Array.from(session.exercises.values())
+  }));
+}
+
 function snapshotExercise(exercise, overrides = {}) {
-  const sets = Array.isArray(exercise.sets) && exercise.sets.length > 0
-    ? exercise.sets
-    : Array.from({ length: Number(exercise.targetSets) || 1 }, (_, index) => ({
-        setNumber: index + 1,
-        targetReps: Number(exercise.targetReps) || 10,
-        targetWeight: Number(exercise.targetWeight) || 0,
-        targetRIR: exercise.targetRIR || '2'
-      }));
+  const sets = resolveTargetSets(exercise);
   const firstSet = sets[0] || {};
 
   return {
@@ -25,14 +91,14 @@ function snapshotExercise(exercise, overrides = {}) {
     name: exercise.name || 'New Exercise',
     muscleGroup: exercise.muscleGroup || 'Uncategorized',
     targetSets: sets.length,
-    targetReps: Number(firstSet.targetReps ?? exercise.targetReps) || 10,
-    targetWeight: Number(firstSet.targetWeight ?? exercise.targetWeight) || 0,
-    targetRIR: firstSet.targetRIR ?? exercise.targetRIR ?? '2',
+    targetReps: numberOrFallback(firstSet.targetReps ?? firstSet.reps ?? exercise.targetReps ?? exercise.reps, 10),
+    targetWeight: numberOrFallback(firstSet.targetWeight ?? firstSet.weight ?? exercise.targetWeight ?? exercise.weight, 0),
+    targetRIR: normalizeRIROption(firstSet.targetRIR ?? firstSet.rir ?? exercise.targetRIR ?? exercise.rir, '2'),
     sets: sets.map((set, index) => ({
       setNumber: index + 1,
-      targetReps: Number(set.targetReps ?? set.reps) || 10,
-      targetWeight: Number(set.targetWeight ?? set.weight) || 0,
-      targetRIR: set.targetRIR ?? set.rir ?? '2'
+      targetReps: numberOrFallback(set.targetReps ?? set.reps, 10),
+      targetWeight: numberOrFallback(set.targetWeight ?? set.weight, 0),
+      targetRIR: normalizeRIROption(set.targetRIR ?? set.rir, '2')
     })),
     weightStep: Number(exercise.weightStep) || undefined,
     restTimer: Number(exercise.restTimer) || undefined,
@@ -50,18 +116,49 @@ export default function WorkoutScreen() {
   const [dragOverSessionExercise, setDragOverSessionExercise] = useState(null);
   const [isReorderingSessionExercise, setIsReorderingSessionExercise] = useState(false);
   const [switchQueries, setSwitchQueries] = useState({});
+  const [selectedDate, setSelectedDate] = useState(localDateKey());
+  const [historyLogs, setHistoryLogs] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const longPressRef = useRef(null);
   const pendingPointerRef = useRef(null);
   const suppressClickRef = useRef(false);
   const navigate = useNavigate();
 
-  if (loading) return <div className={styles.viewport}><p>Loading...</p></div>;
-
+  const today = localDateKey();
+  const isToday = selectedDate === today;
   const nextDay = getNextDay();
   const sessionExercises = currentSession?.sessionExercises || [];
   const exerciseOptions = exercises
     .filter(ex => `${ex.name} ${ex.muscleGroup || ''}`.toLowerCase().includes(exerciseQuery.trim().toLowerCase()))
     .sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || a.name.localeCompare(b.name));
+  const historySessions = buildHistorySessions(historyLogs);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadHistory() {
+      if (isToday) {
+        setHistoryLogs([]);
+        return;
+      }
+
+      setHistoryLoading(true);
+      try {
+        const logs = await getLogsByDate(selectedDate);
+        if (!cancelled) setHistoryLogs(logs);
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
+      }
+    }
+
+    loadHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, [isToday, selectedDate]);
+
+  if (loading) return <div className={styles.viewport}><p>Loading...</p></div>;
 
   function createPlannedSession() {
     if (!activeBlock || !nextDay) return null;
@@ -158,6 +255,12 @@ export default function WorkoutScreen() {
 
   function finishCurrentSession() {
     if (!currentSession) return;
+    setShowFinishConfirm(true);
+  }
+
+  function confirmFinishSession() {
+    if (!currentSession) return;
+    setShowFinishConfirm(false);
     navigate(`/summary/${currentSession.dayId}`);
   }
 
@@ -292,7 +395,7 @@ export default function WorkoutScreen() {
         sessionExerciseId: item.sessionExerciseId,
         sourceExerciseIndex: item.sourceExerciseIndex,
         baseExerciseName: item.baseExerciseName || item.name,
-        switchedFrom: item.name,
+        switchedFrom: item.switchedFrom || item.name,
         isAdHoc: item.isAdHoc
       });
     }));
@@ -333,23 +436,35 @@ export default function WorkoutScreen() {
             <small>{Math.min(activeBlock.currentDayIndex || 0, activeBlock.days.length)} / {activeBlock.days.length} days complete</small>
           </div>
         )}
+        <label className={styles.dateControl}>
+          <span>Workout date</span>
+          <input
+            type="date"
+            value={selectedDate}
+            max={today}
+            onChange={event => {
+              setSelectedDate(event.target.value || today);
+              setShowFinishConfirm(false);
+            }}
+          />
+        </label>
       </div>
 
-      {!activeBlock && !hasActiveSession && (
+      {isToday && !activeBlock && !hasActiveSession && (
         <div className={styles.empty}>
           <h2>No Active Block</h2>
           <p>You can still start an extra session or go to Planner to create/import a training block.</p>
         </div>
       )}
 
-      {activeBlock && !nextDay && !hasActiveSession && (
+      {isToday && activeBlock && !nextDay && !hasActiveSession && (
         <div className={styles.empty}>
           <h2>Block Complete</h2>
           <p>All days in this block have been completed.</p>
         </div>
       )}
 
-      <div className={styles.sessionActions}>
+      {isToday && <div className={styles.sessionActions}>
         {nextDay && !hasActiveSession && (
           <button className={styles.primaryBtn} onClick={() => createPlannedSession()}>
             Start Planned Session
@@ -365,9 +480,9 @@ export default function WorkoutScreen() {
             Cancel Session
           </button>
         )}
-      </div>
+      </div>}
 
-      {hasActiveSession && (
+      {isToday && hasActiveSession && (
         <div className={styles.addPanel}>
           <input
             type="search"
@@ -385,10 +500,66 @@ export default function WorkoutScreen() {
         </div>
       )}
 
-      <div className={styles.list}>
+      {!isToday && (
+        <div className={styles.historyList}>
+          {historyLoading && <div className={styles.empty}><p>Loading workout history...</p></div>}
+          {!historyLoading && historySessions.length === 0 && (
+            <div className={styles.empty}>
+              <h2>No finished workout</h2>
+              <p>No logged sets were found for this date.</p>
+            </div>
+          )}
+          {!historyLoading && historySessions.map(session => (
+            <section key={session.sessionId} className={styles.historySession}>
+              <div className={styles.historySessionHeader}>
+                <div>
+                  <h2>{session.title}</h2>
+                  <p>{session.sets} sets / {Math.round(session.volume).toLocaleString()} kg</p>
+                </div>
+                {session.source && <span>{session.source}</span>}
+              </div>
+              {session.exercises.map((exercise, index) => {
+                const bestSet = exercise.sets.reduce((best, set) => {
+                  const bestVolume = numberOrFallback(best?.weight, 0) * numberOrFallback(best?.reps, 0);
+                  const setVolume = numberOrFallback(set.weight, 0) * numberOrFallback(set.reps, 0);
+                  return setVolume > bestVolume ? set : best;
+                }, exercise.sets[0]);
+
+                return (
+                  <article key={`${session.sessionId}-${exercise.name}-${index}`} className={styles.historyExercise}>
+                    <div className={styles.info}>
+                      <div className={styles.muscleTag}>{exercise.muscleGroup}</div>
+                      <div className={styles.name}>{exercise.name}</div>
+                      <div className={styles.meta}>
+                        <span>{exercise.sets.length} set{exercise.sets.length === 1 ? '' : 's'}</span>
+                        <span>{Math.round(exercise.volume).toLocaleString()} kg</span>
+                        {bestSet && <span>Best {bestSet.weight} kg x {bestSet.reps}</span>}
+                      </div>
+                      {exercise.switchedFrom && <div className={styles.switchNote}>Switched from {exercise.switchedFrom}</div>}
+                    </div>
+                    <div className={styles.historySets}>
+                      {exercise.sets.map(set => (
+                        <span key={set.id || `${set.setNumber}-${set.timestamp}`}>
+                          Set {set.setNumber}: {set.weight} kg x {set.reps} @ RIR {set.rir || '?'}
+                        </span>
+                      ))}
+                    </div>
+                  </article>
+                );
+              })}
+            </section>
+          ))}
+        </div>
+      )}
+
+      {isToday && <div className={styles.list}>
         {(hasActiveSession ? sessionExercises : nextDay?.exercises || []).map((ex, i) => {
-          const loggedSets = hasActiveSession ? loggedSetsFor(ex.sessionExerciseId) : 0;
-          const done = hasActiveSession ? loggedSets >= ex.targetSets : ex.completed;
+          const displayExercise = hasActiveSession ? ex : snapshotExercise(ex, {
+            sourceExerciseIndex: i,
+            sessionExerciseId: `preview-${i}`
+          });
+          const loggedSets = hasActiveSession ? loggedSetsFor(displayExercise.sessionExerciseId) : 0;
+          const done = hasActiveSession ? loggedSets >= displayExercise.targetSets : ex.completed;
           return (
             <div
               key={ex.sessionExerciseId || i}
@@ -413,9 +584,9 @@ export default function WorkoutScreen() {
                       event.stopPropagation();
                       removeSessionExercise(i);
                     }}
-                    aria-label={`Remove ${ex.name}`}
+                    aria-label={`Remove ${displayExercise.name}`}
                   >
-                    x
+                    &times;
                   </button>
                 </>
               )}
@@ -424,21 +595,21 @@ export default function WorkoutScreen() {
                 hasActiveSession ? navigate(`/exercise/${currentSession.dayId}/${i}`) : startPlannedAt(i);
               }}>
                 <div className={styles.info}>
-                  <div className={styles.muscleTag}>{ex.muscleGroup}</div>
-                  <div className={styles.name}>{ex.name}</div>
+                  <div className={styles.muscleTag}>{displayExercise.muscleGroup}</div>
+                  <div className={styles.name}>{displayExercise.name}</div>
                   <div className={styles.meta}>
-                    <span>{ex.targetSets} x {ex.targetReps}</span>
-                    <span>{ex.targetWeight} kg</span>
-                    <span>RIR {ex.targetRIR}</span>
+                    <span>{displayExercise.targetSets} x {displayExercise.targetReps}</span>
+                    <span>{displayExercise.targetWeight} kg</span>
+                    <span>RIR {displayExercise.targetRIR}</span>
                     {hasActiveSession && <span>{loggedSets} done</span>}
                   </div>
-                  {ex.switchedFrom && <div className={styles.switchNote}>Switched from {ex.switchedFrom}</div>}
+                  {displayExercise.switchedFrom && <div className={styles.switchNote}>Switched from {displayExercise.switchedFrom}</div>}
                 </div>
                 <div className={`${styles.indicator} ${done ? styles.done : ''}`}>
                   {done ? (
                     <span className={styles.indicatorCheck} role="img" aria-label="Exercise complete" />
                   ) : (
-                    <span className={styles.indicatorCount}>{hasActiveSession ? `${loggedSets}/${ex.targetSets}` : 'Plan'}</span>
+                    <span className={styles.indicatorCount}>{hasActiveSession ? `${loggedSets}/${displayExercise.targetSets}` : 'Plan'}</span>
                   )}
                 </div>
               </div>
@@ -466,20 +637,39 @@ export default function WorkoutScreen() {
             </div>
           );
         })}
-      </div>
+      </div>}
 
-      {hasActiveSession && sessionExercises.length === 0 && (
+      {isToday && hasActiveSession && sessionExercises.length === 0 && (
         <div className={styles.empty}>
           <h2>No Exercises</h2>
           <p>Add an exercise or finish the session.</p>
         </div>
       )}
 
-      {hasActiveSession && (
+      {isToday && hasActiveSession && (
         <div className={styles.finishActions}>
           <button className={styles.finishBtn} type="button" onClick={finishCurrentSession}>
             {currentSession.source === 'ad_hoc' ? 'Finish Extra Session' : 'Finish Workout'}
           </button>
+        </div>
+      )}
+
+      {showFinishConfirm && (
+        <div className={styles.confirmOverlay} role="dialog" aria-modal="true" aria-labelledby="finish-confirm-title">
+          <div className={styles.confirmDialog}>
+            <h2 id="finish-confirm-title">
+              {currentSession?.source === 'ad_hoc' ? 'Finish extra session?' : 'Finish workout?'}
+            </h2>
+            <p>This will open the summary. The workout is completed when you confirm the summary.</p>
+            <div className={styles.confirmActions}>
+              <button className={styles.secondaryBtn} type="button" onClick={() => setShowFinishConfirm(false)}>
+                Cancel
+              </button>
+              <button className={styles.finishBtn} type="button" onClick={confirmFinishSession}>
+                Finish
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
