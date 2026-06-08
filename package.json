@@ -3,11 +3,25 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "vite build && gh-pages -d dist"
+
+    "cap:sync": "npx cap sync android",
+    "cap:copy": "npx cap copy android",
+    "cap:update": "npx cap update android",
+
+    "apk:prepare": "npm run build && npm run cap:sync",
+    "apk:resync": "npm install && npm run apk:prepare",
+    "apk:status": "git status",
+
+    "workflow:note": "echo \"Push to GitHub, then download APK from Actions -> Build Android APK -> Artifacts -> gymtracker-debug-apk\"",
+
+    "deploy": "npm run build && gh-pages -d dist"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.0",
