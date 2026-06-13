@@ -1,5 +1,6 @@
 .screen {
   height: 100vh;
+  height: 100dvh;
   width: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -10,7 +11,7 @@
   flex-direction: column;
   justify-content: center;
   min-height: 100%;
-  padding: 24px 16px 40px;
+  padding: calc(24px + var(--safe-top)) calc(16px + var(--safe-right)) calc(40px + var(--safe-bottom)) calc(16px + var(--safe-left));
   max-width: 480px;
   margin: 0 auto;
 }

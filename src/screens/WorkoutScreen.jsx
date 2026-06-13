@@ -177,6 +177,20 @@ export default function WorkoutScreen() {
     };
   }, [isToday, selectedDate]);
 
+  useEffect(() => {
+    if (!showFinishConfirm) return undefined;
+
+    function handleShellBack(event) {
+      event.preventDefault();
+      setShowFinishConfirm(false);
+    }
+
+    document.addEventListener('app-shell-back', handleShellBack);
+    return () => {
+      document.removeEventListener('app-shell-back', handleShellBack);
+    };
+  }, [showFinishConfirm]);
+
   if (loading) return <div className={styles.viewport}><p>Loading...</p></div>;
 
   function createPlannedSession() {

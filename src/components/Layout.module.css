@@ -2,19 +2,22 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   width: 100%;
 }
 
 .content {
   flex: 1;
   overflow-y: auto;
+  padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
+  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 
 .nav {
   display: flex;
   justify-content: space-around;
-  padding: 10px 0 20px;
+  padding: 10px var(--safe-right) calc(20px + var(--safe-bottom)) var(--safe-left);
   background: var(--bg-dark);
   border-top: 1px solid var(--border);
   flex-shrink: 0;

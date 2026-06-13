@@ -626,7 +626,11 @@ export default function AnalyticsScreen() {
                       type="search"
                       list="analytics-exercise-options"
                       value={exerciseSearch}
-                      onFocus={event => event.currentTarget.select()}
+                      onFocus={event => {
+                        if (window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) {
+                          event.currentTarget.select();
+                        }
+                      }}
                       onChange={event => {
                         const nextValue = event.target.value;
                         setExerciseSearch(nextValue);

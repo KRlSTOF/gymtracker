@@ -1,4 +1,8 @@
 :root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
   --bg-dark: #0a0a0a;
   --bg-card: #141414;
   --bg-input: #1a1a1a;
@@ -80,10 +84,26 @@ button:active {
 input,
 textarea,
 select {
+  min-width: 0;
   transition:
     border-color 180ms ease,
     box-shadow 180ms ease,
     background-color 180ms ease;
+}
+
+select,
+option {
+  max-width: 100%;
+}
+
+.dropdown-menu,
+.select-menu,
+.combobox-options,
+[role="listbox"] {
+  max-height: min(50vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 input:focus,
@@ -163,5 +183,20 @@ select:focus {
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+@media (max-width: 768px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  .dropdown-menu,
+  .select-menu,
+  .combobox-options,
+  [role="listbox"] {
+    max-height: min(40vh, 280px);
   }
 }

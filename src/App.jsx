@@ -1,4 +1,5 @@
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { useEffect } from 'react';
+import { HashRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext.jsx';
 import Layout from './components/Layout.jsx';
 import WorkoutScreen from './screens/WorkoutScreen.jsx';
@@ -9,10 +10,93 @@ import ExerciseSession from './screens/ExerciseSession.jsx';
 import TimerScreen from './screens/TimerScreen.jsx';
 import SessionSummary from './screens/SessionSummary.jsx';
 
+const ROOT_ROUTES = new Set(['/', '/planner', '/analytics', '/settings']);
+
+function closeTransientUi() {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement) {
+    const tagName = active.tagName.toLowerCase();
+    const isEditable =
+      tagName === 'input' ||
+      tagName === 'textarea' ||
+      tagName === 'select' ||
+      active.isContentEditable;
+
+    if (isEditable) {
+      active.blur();
+      return true;
+    }
+  }
+
+  const openDialog = document.querySelector('dialog[open]');
+  if (openDialog && typeof openDialog.close === 'function') {
+    openDialog.close();
+    return true;
+  }
+
+  const modal = document.querySelector('[aria-modal="true"], [role="dialog"]');
+  if (modal) {
+    const event = new CustomEvent('app-shell-back', { bubbles: true, cancelable: true });
+    modal.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+
+  return false;
+}
+
+function CapacitorShell() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const capacitor = window.Capacitor;
+    const statusBar = capacitor?.Plugins?.StatusBar;
+
+    if (!capacitor?.isNativePlatform?.()) return undefined;
+
+    statusBar?.setOverlaysWebView?.({ overlay: false }).catch?.(() => {});
+  }, []);
+
+  useEffect(() => {
+    const capacitor = window.Capacitor;
+    const app = capacitor?.Plugins?.App;
+
+    if (!capacitor?.isNativePlatform?.() || !app?.addListener) return undefined;
+
+    let listener;
+    let isMounted = true;
+
+    app
+      .addListener('backButton', () => {
+        if (closeTransientUi()) return;
+
+        if (!ROOT_ROUTES.has(location.pathname)) {
+          navigate(-1);
+        }
+      })
+      .then(handle => {
+        if (isMounted) {
+          listener = handle;
+        } else {
+          handle?.remove?.();
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+      listener?.remove?.();
+    };
+  }, [location.pathname, navigate]);
+
+  return null;
+}
+
 export default function App() {
   return (
     <AppProvider>
       <HashRouter>
+        <CapacitorShell />
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<WorkoutScreen />} />
