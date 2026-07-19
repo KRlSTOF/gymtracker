@@ -122,10 +122,12 @@ function snapshotExercise(exercise, overrides = {}) {
 export default function WorkoutScreen() {
   const { activeBlock, currentSession, exercises, getNextDay, loading, appSettings, setCurrentSession } = useApp();
   const [exerciseQuery, setExerciseQuery] = useState('');
+  const [addExerciseOpen, setAddExerciseOpen] = useState(false);
   const [draggingSessionExercise, setDraggingSessionExercise] = useState(null);
   const [dragOverSessionExercise, setDragOverSessionExercise] = useState(null);
   const [isReorderingSessionExercise, setIsReorderingSessionExercise] = useState(false);
   const [switchQueries, setSwitchQueries] = useState({});
+  const [switchingExerciseIndex, setSwitchingExerciseIndex] = useState(null);
   const [selectedDate, setSelectedDate] = useState(localDateKey());
   const [historyLogs, setHistoryLogs] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -140,8 +142,9 @@ export default function WorkoutScreen() {
   const isToday = selectedDate === today;
   const nextDay = getNextDay();
   const sessionExercises = currentSession?.sessionExercises || [];
+  const normalizedExerciseQuery = exerciseQuery.trim().toLowerCase();
   const exerciseOptions = exercises
-    .filter(ex => `${ex.name} ${ex.muscleGroup || ''}`.toLowerCase().includes(exerciseQuery.trim().toLowerCase()))
+    .filter(ex => normalizedExerciseQuery && `${ex.name} ${ex.muscleGroup || ''}`.toLowerCase().includes(normalizedExerciseQuery))
     .sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || a.name.localeCompare(b.name));
   const historySessions = buildHistorySessions(historyLogs);
 
@@ -265,6 +268,8 @@ export default function WorkoutScreen() {
       ...baseSession,
       sessionExercises: [...baseSession.sessionExercises, nextExercise]
     });
+    setExerciseQuery('');
+    setAddExerciseOpen(false);
   }
 
   function updateSessionExercises(updater) {
@@ -469,20 +474,20 @@ export default function WorkoutScreen() {
 
   async function switchSessionExercise(index, libraryId) {
     const replacement = exercises.find(ex => String(ex.id) === String(libraryId));
-    if (!replacement) return;
+    if (!replacement) return false;
     const current = currentSession?.sessionExercises?.[index];
-    if (!current) return;
+    if (!current) return false;
 
     let persistedLogs;
     try {
       persistedLogs = await getLogsBySessionExercise(currentSession.sessionId, current.sessionExerciseId);
     } catch (error) {
       setSessionNotice(error?.message || `Could not check ${current.name}'s logged sets.`);
-      return;
+      return false;
     }
     if (persistedLogs.length > 0) {
       setSessionNotice(`Remove ${current.name}'s logged sets before switching it to another exercise.`);
-      return;
+      return false;
     }
 
     setCurrentSession(session => {
@@ -510,14 +515,18 @@ export default function WorkoutScreen() {
       };
     });
     setSessionNotice(`Switched ${current.name} to ${replacement.name} for this session.`);
+    return true;
   }
 
-  function switchSessionExerciseByName(index, value) {
+  async function switchSessionExerciseByName(index, value) {
     const query = String(value || '').trim().toLowerCase();
     const replacement = exercises.find(exercise => String(exercise.name || '').trim().toLowerCase() === query);
     if (!replacement) return;
-    switchSessionExercise(index, replacement.id);
-    setSwitchQueries(prev => ({ ...prev, [index]: '' }));
+    const switched = await switchSessionExercise(index, replacement.id);
+    if (switched) {
+      setSwitchQueries(prev => ({ ...prev, [index]: '' }));
+      setSwitchingExerciseIndex(null);
+    }
   }
 
   function loggedSetsFor(sessionExerciseId) {
@@ -602,21 +611,41 @@ export default function WorkoutScreen() {
 
       {isToday && hasActiveSession && (
         <div className={styles.addPanel}>
-          <input
-            type="search"
-            autoComplete="off"
-            name="add-session-exercise"
-            value={exerciseQuery}
-            onChange={event => setExerciseQuery(event.target.value)}
-            placeholder="Search library to add exercise"
-          />
-          <div className={styles.pickerList}>
-            {exerciseOptions.slice(0, 6).map(ex => (
-              <button key={ex.id} onClick={() => addExerciseToSession(ex)}>
-                + {ex.name}
-              </button>
-            ))}
-          </div>
+          <button
+            className={styles.addExerciseToggle}
+            type="button"
+            aria-expanded={addExerciseOpen}
+            onClick={() => {
+              setAddExerciseOpen(open => !open);
+              setExerciseQuery('');
+            }}
+          >
+            {addExerciseOpen ? 'Close exercise search' : 'Add exercise'}
+          </button>
+          {addExerciseOpen && (
+            <div className={styles.addExerciseSearch}>
+              <input
+                type="search"
+                autoComplete="off"
+                name="add-session-exercise"
+                value={exerciseQuery}
+                onChange={event => setExerciseQuery(event.target.value)}
+                placeholder="Search exercise library"
+                aria-label="Search exercise library to add an exercise"
+                autoFocus
+              />
+              {normalizedExerciseQuery && (
+                <div className={styles.pickerList}>
+                  {exerciseOptions.slice(0, 6).map(ex => (
+                    <button key={ex.id} type="button" onClick={() => addExerciseToSession(ex)}>
+                      {ex.name}
+                    </button>
+                  ))}
+                  {exerciseOptions.length === 0 && <p>No matching exercises</p>}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -725,16 +754,34 @@ export default function WorkoutScreen() {
                   </div>
                   {displayExercise.switchedFrom && <div className={styles.switchNote}>Switched from {displayExercise.switchedFrom}</div>}
                 </div>
-                <div className={`${styles.indicator} ${done ? styles.done : ''}`}>
-                  {done ? (
-                    <span className={styles.indicatorCheck} role="img" aria-label="Exercise complete" />
-                  ) : (
-                    <span className={styles.indicatorCount}>{hasActiveSession ? `${loggedSets}/${displayExercise.targetSets}` : 'Plan'}</span>
+                <div className={styles.cardActions}>
+                  {hasActiveSession && (
+                    <button
+                      className={styles.swapBtn}
+                      type="button"
+                      aria-expanded={switchingExerciseIndex === i}
+                      aria-label={`Swap ${displayExercise.name}`}
+                      onPointerDown={event => event.stopPropagation()}
+                      onClick={event => {
+                        event.stopPropagation();
+                        setSwitchingExerciseIndex(current => current === i ? null : i);
+                        setSwitchQueries(prev => ({ ...prev, [i]: '' }));
+                      }}
+                    >
+                      Swap
+                    </button>
                   )}
+                  <div className={`${styles.indicator} ${done ? styles.done : ''}`}>
+                    {done ? (
+                      <span className={styles.indicatorCheck} role="img" aria-label="Exercise complete" />
+                    ) : (
+                      <span className={styles.indicatorCount}>{hasActiveSession ? `${loggedSets}/${displayExercise.targetSets}` : 'Plan'}</span>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {hasActiveSession && (
+              {hasActiveSession && switchingExerciseIndex === i && (
                 <div className={styles.rowTools}>
                   <input
                     type="search"
@@ -746,7 +793,9 @@ export default function WorkoutScreen() {
                       setSwitchQueries(prev => ({ ...prev, [i]: value }));
                       switchSessionExerciseByName(i, value);
                     }}
-                    placeholder="Search to switch exercise"
+                    placeholder="Search replacement exercise"
+                    aria-label={`Search replacement for ${displayExercise.name}`}
+                    autoFocus
                   />
                   {switchQueries[i]?.trim() && (
                     <div className={styles.switchPickerList}>

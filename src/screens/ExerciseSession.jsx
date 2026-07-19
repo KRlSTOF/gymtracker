@@ -63,7 +63,8 @@ export default function ExerciseSession() {
   const [rir, setRIR] = useState(normalizeRIROption(savedDraft.rir ?? exercise?.targetRIR, '2'));
   const [exerciseNote, setExerciseNote] = useState(savedDraft.exerciseNote || '');
   const [notesOpen, setNotesOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [referenceOpen, setReferenceOpen] = useState(false);
+  const [noteHistoryOpen, setNoteHistoryOpen] = useState(false);
   const [noteHistory, setNoteHistory] = useState([]);
   const [noteStatus, setNoteStatus] = useState('');
   const [compromisedForm, setCompromisedForm] = useState(Boolean(savedDraft.compromisedForm));
@@ -178,7 +179,8 @@ export default function ExerciseSession() {
       setRIR(normalizeRIROption(draft.rir ?? target.rir, '2'));
       setExerciseNote(draft.exerciseNote || '');
       setNotesOpen(false);
-      setHistoryOpen(false);
+      setReferenceOpen(false);
+      setNoteHistoryOpen(false);
       setNoteStatus('');
       setCompromisedForm(Boolean(draft.compromisedForm));
     }
@@ -220,17 +222,6 @@ export default function ExerciseSession() {
       reps: target?.targetReps ?? target?.reps ?? exercise.targetReps,
       rir: normalizeRIROption(target?.targetRIR ?? target?.rir ?? exercise.targetRIR, '2')
     };
-  }
-
-  function quickFillFromLast() {
-    if (!lastReference) return;
-    const nextWeight = String(Number(lastReference.weight) || 0);
-    const nextReps = String(Number(lastReference.reps) || 0);
-    const nextRir = normalizeRIROption(lastReference.rir || exercise.targetRIR, '2');
-    setWeight(nextWeight);
-    setReps(nextReps);
-    setRIR(nextRir);
-    updateExerciseDraft({ weight: nextWeight, reps: nextReps, rir: nextRir });
   }
 
   function startEditingSet(index) {
@@ -458,10 +449,12 @@ export default function ExerciseSession() {
   return (
     <div className={styles.screen}>
       <div className={styles.stickyHeader}>
-        <button className={styles.backBtn} onClick={() => navigate('/')}>{'<'}</button>
+        <button className={styles.backBtn} onClick={() => navigate('/')} aria-label="Back to workout">{'<'}</button>
         <div className={styles.headerInfo}>
           <div className={styles.headerName}>{exercise.name}</div>
-          <div className={styles.headerProgress}>Set {currentSet} of {totalSets} planned</div>
+          <div className={styles.headerProgress}>
+            {targetReached ? `${totalSets} of ${totalSets} sets complete` : `Set ${currentSet} of ${totalSets} planned`}
+          </div>
         </div>
         <div style={{ width: 40 }} />
       </div>
@@ -508,37 +501,23 @@ export default function ExerciseSession() {
             </div>
           </div>
 
-          {(reference.exactMatch || reference.anyMatch) && (
-            <div className={styles.reference}>
-              <div className={styles.referenceHeader}>
-                <div>
-                  <span>History</span>
-                </div>
-                <button className={styles.quickFillBtn} onClick={quickFillFromLast}>
-                  Fill from last
-                </button>
-              </div>
-              <div className={styles.referenceGrid}>
-                {referenceItems.map(({ label, item }) => (
-                  <div key={`${label}-${item.date}-${item.weight}-${item.reps}`} className={styles.referenceCard}>
-                    <span>{label}</span>
-                    <strong>{item.weight} kg x {item.reps}</strong>
-                    <em>RIR {item.rir || '?'} - {formatLogDate(item.date)}</em>
-                  </div>
-                ))}
-              </div>
+          <div className={styles.inputSection}>
+            <div className={styles.sectionTitleRow}>
+              <div className={styles.sectionTitle}>{targetReached ? 'Planned sets complete' : `Set ${currentSet} - Log`}</div>
+              <button
+                className={`${styles.noteIconBtn} ${exerciseNote.trim() ? styles.hasNote : ''}`}
+                type="button"
+                aria-label={notesOpen ? 'Close set note' : exerciseNote.trim() ? 'Edit set note' : 'Add set note'}
+                aria-expanded={notesOpen}
+                title={exerciseNote.trim() ? 'Edit set note' : 'Add set note'}
+                onClick={() => setNotesOpen(open => !open)}
+              >
+                <span aria-hidden="true">🗨︎</span>
+              </button>
             </div>
-          )}
 
-          <div className={styles.exerciseNotes}>
-            <button className={styles.notesToggle} onClick={() => setNotesOpen(open => !open)}>
-              <span>
-                <strong>Set note</strong>
-              </span>
-              <b>{notesOpen ? 'Close' : 'Add'}</b>
-            </button>
             {notesOpen && (
-              <div className={styles.notesBody}>
+              <div className={styles.notePanel}>
                 <textarea
                   rows="3"
                   value={exerciseNote}
@@ -546,34 +525,116 @@ export default function ExerciseSession() {
                     setExerciseNote(event.target.value);
                     updateExerciseDraft({ exerciseNote: event.target.value });
                   }}
-                  placeholder="Technique cues, setup reminders, or planner pointers..."
+                  placeholder="Technique cues or setup reminders"
+                  aria-label="Set note"
                 />
                 <div className={styles.noteActions}>
-                  <button onClick={saveExerciseNote}>Save Note</button>
-                  {noteStatus && <span>{noteStatus}</span>}
+                  <button type="button" onClick={saveExerciseNote}>Save note</button>
+                  {noteStatus && <span role="status">{noteStatus}</span>}
                 </div>
+                {noteHistory.length > 0 && (
+                  <div className={styles.pastNotes}>
+                    <button className={styles.historyToggle} type="button" onClick={() => setNoteHistoryOpen(open => !open)}>
+                      <span>Past notes</span>
+                      <strong>{noteHistoryOpen ? 'Hide' : noteHistory.length}</strong>
+                    </button>
+                    {noteHistoryOpen && noteHistory.map((item, index) => (
+                      <div key={`${item.date}-${index}`} className={styles.noteHistoryItem}>
+                        <div className={styles.noteHistoryMeta}>
+                          <span>{formatLogDate(item.date)}</span>
+                          <span>{item.source}</span>
+                          <span>Set {item.setNumber ?? '?'}</span>
+                          <span>{item.weight ?? '?'} kg x {item.reps ?? '?'}</span>
+                          <span>RIR {item.rir || '?'}</span>
+                          {item.switchedFrom && <span>Switched from {item.switchedFrom}</span>}
+                        </div>
+                        <p>{item.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
-            {noteHistory.length > 0 && (
-              <div className={styles.pastNotes}>
-                <button className={styles.historyToggle} onClick={() => setHistoryOpen(open => !open)}>
-                  <span>Past note history</span>
-                  <strong>{historyOpen ? 'Hide' : `Show ${noteHistory.length}`}</strong>
-                </button>
-                {historyOpen && noteHistory.map((item, index) => (
-                  <div key={`${item.date}-${index}`} className={styles.noteHistoryItem}>
-                    <div className={styles.noteHistoryMeta}>
-                      <span>{formatLogDate(item.date)}</span>
-                      <span>{item.source}</span>
-                      <span>Set {item.setNumber ?? '?'}</span>
-                      <span>{item.weight ?? '?'} kg x {item.reps ?? '?'}</span>
-                      <span>RIR {item.rir || '?'}</span>
-                      {item.switchedFrom && <span>Switched from {item.switchedFrom}</span>}
-                    </div>
-                    <p>{item.text}</p>
-                  </div>
+
+            {!targetReached && <div className={styles.inputGrid}>
+              <div className={styles.inputField}>
+                <label htmlFor="set-weight">Weight</label>
+                <div className={styles.inputWrapper}>
+                  <button type="button" onClick={() => adjustWeight(-1)} aria-label="Decrease weight">-</button>
+                  <input
+                    id="set-weight"
+                    type="number"
+                    inputMode="decimal"
+                    value={weight}
+                    onChange={e => {
+                      setWeight(e.target.value);
+                      updateExerciseDraft({ weight: e.target.value });
+                    }}
+                  />
+                  <button type="button" onClick={() => adjustWeight(1)} aria-label="Increase weight">+</button>
+                </div>
+              </div>
+              <div className={styles.inputField}>
+                <label htmlFor="set-reps">Reps</label>
+                <div className={styles.inputWrapper}>
+                  <button type="button" onClick={() => adjustReps(-1)} aria-label="Decrease reps">-</button>
+                  <input
+                    id="set-reps"
+                    type="number"
+                    inputMode="numeric"
+                    value={reps}
+                    onChange={e => {
+                      setReps(e.target.value);
+                      updateExerciseDraft({ reps: e.target.value });
+                    }}
+                  />
+                  <button type="button" onClick={() => adjustReps(1)} aria-label="Increase reps">+</button>
+                </div>
+              </div>
+            </div>}
+
+            {!targetReached && <div className={styles.rirSection}>
+              <div className={styles.rirHeader}>
+                <span className={styles.rirLabel}>RIR</span>
+                {lastReference && (
+                  <span>
+                    Last: {lastReference.weight} kg x {lastReference.reps} @ RIR {lastReference.rir || '?'}
+                  </span>
+                )}
+              </div>
+              <div className={styles.rirOptions} role="group" aria-label="Reps in reserve">
+                {RIR_OPTIONS.map(option => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={`${styles.rirOption} ${rir === option ? styles.selected : ''}`}
+                    aria-pressed={rir === option}
+                    onClick={() => {
+                      setRIR(option);
+                      updateExerciseDraft({ rir: option });
+                    }}
+                  >
+                    {option}
+                  </button>
                 ))}
               </div>
+            </div>}
+
+            {!targetReached && <label className={styles.flagToggle}>
+              <input
+                type="checkbox"
+                checked={compromisedForm}
+                onChange={e => {
+                  setCompromisedForm(e.target.checked);
+                  updateExerciseDraft({ compromisedForm: e.target.checked });
+                }}
+              />
+              <span>Form compromised</span>
+            </label>}
+            {targetReached && (
+              <button className={styles.addSetBtn} type="button" onClick={addSetToCurrentExercise}>
+                Add set
+              </button>
             )}
           </div>
 
@@ -641,86 +702,32 @@ export default function ExerciseSession() {
             </div>
           )}
 
-          <div className={styles.inputSection}>
-            <div className={styles.sectionTitle}>{targetReached ? 'Planned sets complete' : `Set ${currentSet} - Log`}</div>
-
-            {!targetReached && <div className={styles.inputGrid}>
-              <div className={styles.inputField}>
-                <label>Weight</label>
-                <div className={styles.inputWrapper}>
-                  <button onClick={() => adjustWeight(-1)}>-</button>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    value={weight}
-                    onChange={e => {
-                      setWeight(e.target.value);
-                      updateExerciseDraft({ weight: e.target.value });
-                    }}
-                  />
-                  <button onClick={() => adjustWeight(1)}>+</button>
-                </div>
-              </div>
-              <div className={styles.inputField}>
-                <label>Reps</label>
-                <div className={styles.inputWrapper}>
-                  <button onClick={() => adjustReps(-1)}>-</button>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    value={reps}
-                    onChange={e => {
-                      setReps(e.target.value);
-                      updateExerciseDraft({ reps: e.target.value });
-                    }}
-                  />
-                  <button onClick={() => adjustReps(1)}>+</button>
-                </div>
-              </div>
-            </div>}
-
-            {!targetReached && <div className={styles.rirSection}>
-              <div className={styles.rirHeader}>
-                <label className={styles.rirLabel}>RIR</label>
-                {lastReference && (
-                  <span>
-                    Last: {lastReference.weight} kg x {lastReference.reps} @ RIR {lastReference.rir || '?'}
-                  </span>
-                )}
-              </div>
-              <div className={styles.rirOptions}>
-                {RIR_OPTIONS.map(option => (
-                  <button
-                    key={option}
-                    className={`${styles.rirOption} ${rir === option ? styles.selected : ''}`}
-                    onClick={() => {
-                      setRIR(option);
-                      updateExerciseDraft({ rir: option });
-                    }}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-            </div>}
-
-            {!targetReached && <label className={styles.flagToggle}>
-              <input
-                type="checkbox"
-                checked={compromisedForm}
-                onChange={e => {
-                  setCompromisedForm(e.target.checked);
-                  updateExerciseDraft({ compromisedForm: e.target.checked });
-                }}
-              />
-              <span>Form compromised</span>
-            </label>}
-            {targetReached && (
-              <button className={styles.addSetBtn} type="button" onClick={addSetToCurrentExercise}>
-                Add set
+          {(reference.exactMatch || reference.anyMatch) && (
+            <div className={styles.reference}>
+              <button
+                className={styles.referenceToggle}
+                type="button"
+                aria-expanded={referenceOpen}
+                onClick={() => setReferenceOpen(open => !open)}
+              >
+                <span>History</span>
+                <strong>
+                  {referenceOpen ? 'Hide' : `${lastReference.weight} kg x ${lastReference.reps} @ RIR ${lastReference.rir || '?'}`}
+                </strong>
               </button>
-            )}
-          </div>
+              {referenceOpen && (
+                <div className={styles.referenceGrid}>
+                  {referenceItems.map(({ label, item }) => (
+                    <div key={`${label}-${item.date}-${item.weight}-${item.reps}`} className={styles.referenceCard}>
+                      <span>{label}</span>
+                      <strong>{item.weight} kg x {item.reps}</strong>
+                      <em>RIR {item.rir || '?'} - {formatLogDate(item.date)}</em>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -737,7 +744,7 @@ export default function ExerciseSession() {
           <>
             {saveError && <p className={styles.saveError} role="alert">{saveError}</p>}
             <button className={styles.confirmBtn} onClick={confirmSet} disabled={isSavingSet}>
-              {isSavingSet ? 'Saving...' : 'Confirm Set'}
+              {isSavingSet ? 'Saving...' : `Confirm ${Number(weight) || 0} kg x ${parseInt(reps, 10) || 0} @ RIR ${rir}`}
             </button>
           </>
         ) : (
