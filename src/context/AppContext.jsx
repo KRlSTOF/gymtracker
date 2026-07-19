@@ -101,6 +101,13 @@ export function AppProvider({ children }) {
     setAppSettingsState(normalizeSettings(storedSettings));
   }
 
+  async function restoreCurrentSession() {
+    const storedSession = await db.getSetting('currentSession') || null;
+    saveLocalSession(storedSession);
+    setCurrentSessionState(storedSession);
+    return storedSession;
+  }
+
   // Set active block
   async function setActiveBlockById(id) {
     await db.setSetting('activeBlockId', id);
@@ -117,15 +124,32 @@ export function AppProvider({ children }) {
   }
 
   // Mark day complete and advance
-  async function completeDay() {
-    if (!activeBlock) return;
+  async function completeDay(blockId, expectedDayIndex) {
+    if (blockId === undefined || blockId === null) {
+      throw new Error('This session is not linked to a training block.');
+    }
+    const block = await db.getBlock(blockId);
+    if (!block) {
+      throw new Error('The training block for this session no longer exists.');
+    }
+
+    const currentDayIndex = Number(block.currentDayIndex) || 0;
+    const expectedIndex = Number(expectedDayIndex);
+    if (Number.isFinite(expectedIndex)) {
+      if (currentDayIndex > expectedIndex) return block;
+      if (currentDayIndex < expectedIndex) {
+        throw new Error('The training block position changed before this session was completed.');
+      }
+    }
+
     const updated = {
-      ...activeBlock,
-      currentDayIndex: (activeBlock.currentDayIndex || 0) + 1
+      ...block,
+      currentDayIndex: Math.min(currentDayIndex + 1, block.days?.length ?? currentDayIndex + 1)
     };
     await db.updateBlock(updated);
-    setActiveBlock(updated);
-    setBlocks(prev => prev.map(block => block.id === updated.id ? updated : block));
+    setActiveBlock(current => String(current?.id) === String(updated.id) ? updated : current);
+    setBlocks(prev => prev.map(block => String(block.id) === String(updated.id) ? updated : block));
+    return updated;
   }
 
   const value = {
@@ -140,6 +164,7 @@ export function AppProvider({ children }) {
     refreshExercises,
     refreshBlocks,
     refreshSettings,
+    restoreCurrentSession,
     setActiveBlockById,
     getNextDay,
     completeDay

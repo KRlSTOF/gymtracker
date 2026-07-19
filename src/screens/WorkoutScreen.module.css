@@ -108,6 +108,30 @@
   gap: 8px;
 }
 
+.sessionNotice {
+  display: flex;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto 12px;
+  padding: 10px 12px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  border-radius: var(--radius-sm);
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.sessionNotice button {
+  flex: 0 0 auto;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-size: 20px;
+}
+
 .primaryBtn,
 .secondaryBtn {
   width: 100%;

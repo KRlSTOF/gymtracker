@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext.jsx';
-import { getLogsByDate } from '../data/db.js';
+import {
+  deleteLogsBySessionExercise,
+  getLogsByDate,
+  getLogsBySession,
+  getLogsBySessionExercise
+} from '../data/db.js';
 import { normalizeRIROption } from '../data/csvImport.js';
 import styles from './WorkoutScreen.module.css';
 
@@ -125,6 +130,7 @@ export default function WorkoutScreen() {
   const [historyLogs, setHistoryLogs] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
+  const [sessionNotice, setSessionNotice] = useState('');
   const longPressRef = useRef(null);
   const pendingPointerRef = useRef(null);
   const suppressClickRef = useRef(false);
@@ -269,25 +275,75 @@ export default function WorkoutScreen() {
     });
   }
 
-  function removeSessionExercise(index) {
+  async function removeSessionExercise(index) {
     if (!currentSession) return;
     const target = currentSession.sessionExercises[index];
-    setCurrentSession({
-      ...currentSession,
-      sessionExercises: currentSession.sessionExercises.filter((_, i) => i !== index),
-      sessionLogs: (currentSession.sessionLogs || []).filter(log => log.sessionExerciseId !== target?.sessionExerciseId)
+    if (!target) return;
+
+    let loggedSets;
+    try {
+      loggedSets = await getLogsBySessionExercise(currentSession.sessionId, target.sessionExerciseId);
+    } catch (error) {
+      setSessionNotice(error?.message || `Could not check ${target.name}'s logged sets.`);
+      return;
+    }
+
+    if (loggedSets.length > 0) {
+      const confirmed = window.confirm(
+        `Remove ${target.name} and permanently delete its ${loggedSets.length} logged set${loggedSets.length === 1 ? '' : 's'}?`
+      );
+      if (!confirmed) return;
+      try {
+        await deleteLogsBySessionExercise(currentSession.sessionId, target.sessionExerciseId);
+      } catch (error) {
+        setSessionNotice(error?.message || `Could not remove ${target.name}'s logged sets.`);
+        return;
+      }
+    }
+
+    setCurrentSession(session => {
+      if (!session) return session;
+      const exerciseDrafts = { ...(session.exerciseDrafts || {}) };
+      delete exerciseDrafts[target?.sessionExerciseId];
+      return {
+        ...session,
+        sessionExercises: (session.sessionExercises || []).filter(item => item.sessionExerciseId !== target?.sessionExerciseId),
+        sessionLogs: (session.sessionLogs || []).filter(log => log.sessionExerciseId !== target?.sessionExerciseId),
+        exerciseDrafts
+      };
     });
+    setSessionNotice(loggedSets.length > 0
+      ? `${target.name} and ${loggedSets.length} logged set${loggedSets.length === 1 ? '' : 's'} removed.`
+      : `${target.name} removed from this session.`);
   }
 
-  function cancelEmptySession() {
-    const hasLogs = (currentSession?.sessionLogs || []).length > 0;
-    if (!hasLogs) {
+  async function cancelEmptySession() {
+    if (!currentSession) return;
+    try {
+      const persistedLogs = await getLogsBySession(currentSession.sessionId);
+      if (persistedLogs.length > 0) {
+        setSessionNotice('This session has saved sets and cannot be cancelled as empty.');
+        return;
+      }
       setCurrentSession(null);
+    } catch (error) {
+      setSessionNotice(error?.message || 'Could not verify whether this session is empty.');
     }
   }
 
-  function finishCurrentSession() {
+  async function finishCurrentSession() {
     if (!currentSession) return;
+    let persistedLogs;
+    try {
+      persistedLogs = await getLogsBySession(currentSession.sessionId);
+    } catch (error) {
+      setSessionNotice(error?.message || 'Could not verify the saved sets for this session.');
+      return;
+    }
+    if (persistedLogs.length === 0) {
+      setSessionNotice('Log at least one set before finishing, or cancel the empty session.');
+      return;
+    }
     setShowFinishConfirm(true);
   }
 
@@ -411,23 +467,49 @@ export default function WorkoutScreen() {
     resetSessionReorder();
   }
 
-  function switchSessionExercise(index, libraryId) {
+  async function switchSessionExercise(index, libraryId) {
     const replacement = exercises.find(ex => String(ex.id) === String(libraryId));
     if (!replacement) return;
-    updateSessionExercises(list => list.map((item, i) => {
-      if (i !== index) return item;
-      return snapshotExercise({
-        ...replacement,
-        weightStep: replacement.weightStep ?? appSettings.defaultWeightStep,
-        restTimer: replacement.restTimer ?? appSettings.defaultRestTimer
-      }, {
-        sessionExerciseId: item.sessionExerciseId,
-        sourceExerciseIndex: item.sourceExerciseIndex,
-        baseExerciseName: item.baseExerciseName || item.name,
-        switchedFrom: item.switchedFrom || item.name,
-        isAdHoc: item.isAdHoc
-      });
-    }));
+    const current = currentSession?.sessionExercises?.[index];
+    if (!current) return;
+
+    let persistedLogs;
+    try {
+      persistedLogs = await getLogsBySessionExercise(currentSession.sessionId, current.sessionExerciseId);
+    } catch (error) {
+      setSessionNotice(error?.message || `Could not check ${current.name}'s logged sets.`);
+      return;
+    }
+    if (persistedLogs.length > 0) {
+      setSessionNotice(`Remove ${current.name}'s logged sets before switching it to another exercise.`);
+      return;
+    }
+
+    setCurrentSession(session => {
+      if (!session) return session;
+      const item = session.sessionExercises[index];
+      const exerciseDrafts = { ...(session.exerciseDrafts || {}) };
+      delete exerciseDrafts[item?.sessionExerciseId];
+      return {
+        ...session,
+        exerciseDrafts,
+        sessionExercises: session.sessionExercises.map((sessionExercise, i) => {
+          if (i !== index) return sessionExercise;
+          return snapshotExercise({
+            ...replacement,
+            weightStep: replacement.weightStep ?? appSettings.defaultWeightStep,
+            restTimer: replacement.restTimer ?? appSettings.defaultRestTimer
+          }, {
+            sessionExerciseId: sessionExercise.sessionExerciseId,
+            sourceExerciseIndex: sessionExercise.sourceExerciseIndex,
+            baseExerciseName: sessionExercise.baseExerciseName || sessionExercise.name,
+            switchedFrom: sessionExercise.switchedFrom || sessionExercise.name,
+            isAdHoc: sessionExercise.isAdHoc
+          });
+        })
+      };
+    });
+    setSessionNotice(`Switched ${current.name} to ${replacement.name} for this session.`);
   }
 
   function switchSessionExerciseByName(index, value) {
@@ -510,6 +592,13 @@ export default function WorkoutScreen() {
           </button>
         )}
       </div>}
+
+      {isToday && sessionNotice && (
+        <div className={styles.sessionNotice} role="status">
+          <span>{sessionNotice}</span>
+          <button type="button" onClick={() => setSessionNotice('')} aria-label="Dismiss message">&times;</button>
+        </div>
+      )}
 
       {isToday && hasActiveSession && (
         <div className={styles.addPanel}>

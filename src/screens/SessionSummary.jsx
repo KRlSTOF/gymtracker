@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext.jsx';
-import { getLogsByDate, getAllLogs } from '../data/db.js';
+import { getAllLogs } from '../data/db.js';
 import { estimate1RM } from '../data/calculations.js';
 import styles from './SessionSummary.module.css';
 
@@ -15,23 +15,30 @@ function localDateKey(date = new Date()) {
 export default function SessionSummary() {
   const { dayId } = useParams();
   const navigate = useNavigate();
-  const { activeBlock, completeDay, currentSession, clearCurrentSession } = useApp();
+  const { activeBlock, completeDay, currentSession, clearCurrentSession, loading } = useApp();
 
   const [summary, setSummary] = useState(null);
+  const [isCompleting, setIsCompleting] = useState(false);
+  const [completionError, setCompletionError] = useState('');
 
   const dayIndex = parseInt(dayId);
   const day = Number.isFinite(dayIndex) ? activeBlock?.days[dayIndex] : null;
   const today = localDateKey();
 
   useEffect(() => {
+    if (loading) return undefined;
+    let cancelled = false;
+
     async function buildSummary() {
-      const fallbackTodayLogs = await getLogsByDate(today);
       const allLogs = await getAllLogs();
-      const sessionLogs = currentSession?.sessionLogs?.length ? currentSession.sessionLogs : fallbackTodayLogs;
+      const sessionMatchesRoute = currentSession && String(currentSession.dayId) === String(dayId);
+      const sessionLogs = sessionMatchesRoute
+        ? allLogs.filter(log => log.sessionId === currentSession.sessionId)
+        : [];
 
       const totalTonnage = sessionLogs.reduce((sum, l) => sum + l.weight * l.reps, 0);
       const setsCompleted = sessionLogs.length;
-      const setsTarget = (currentSession?.sessionExercises || day?.exercises || [])
+      const setsTarget = (sessionMatchesRoute ? currentSession.sessionExercises || [] : [])
         .reduce((sum, ex) => sum + (Number(ex.targetSets) || 0), 0);
       const compromisedSets = sessionLogs.filter(l => l.compromisedForm).length;
       const seenNotes = new Set();
@@ -75,11 +82,11 @@ export default function SessionSummary() {
         }
       }
 
-      const sessionTime = currentSession?.sessionStart
+      const sessionTime = sessionMatchesRoute && currentSession.sessionStart
         ? Math.round((Date.now() - currentSession.sessionStart) / 60000)
         : 0;
 
-      setSummary({
+      if (!cancelled) setSummary({
         totalTonnage,
         setsCompleted,
         setsTarget,
@@ -87,19 +94,36 @@ export default function SessionSummary() {
         notes,
         missed,
         records,
-        sessionTime
+        sessionTime,
+        sessionAvailable: Boolean(sessionMatchesRoute)
       });
     }
 
     buildSummary();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSession?.sessionId, dayId, loading]);
 
   async function handleDone() {
-    if (currentSession?.source !== 'ad_hoc') {
-      await completeDay();
+    if (isCompleting) return;
+    if (!summary?.sessionAvailable || !currentSession) {
+      navigate('/');
+      return;
     }
-    clearCurrentSession();
-    navigate('/');
+
+    setIsCompleting(true);
+    setCompletionError('');
+    try {
+      if (currentSession.source === 'plan') {
+        await completeDay(currentSession.blockId, currentSession.dayId);
+      }
+      clearCurrentSession();
+      navigate('/');
+    } catch (error) {
+      setCompletionError(error?.message || 'The session could not be completed.');
+      setIsCompleting(false);
+    }
   }
 
   if (!summary) {
@@ -173,7 +197,13 @@ export default function SessionSummary() {
           )}
         </div>
 
-        <button className={styles.doneBtn} onClick={handleDone}>Done</button>
+        {!summary.sessionAvailable && (
+          <p className={styles.completionError}>This summary is no longer linked to an active session. No training day will be advanced.</p>
+        )}
+        {completionError && <p className={styles.completionError} role="alert">{completionError}</p>}
+        <button className={styles.doneBtn} onClick={handleDone} disabled={isCompleting}>
+          {!summary.sessionAvailable ? 'Back to workout' : isCompleting ? 'Saving...' : 'Done'}
+        </button>
       </div>
     </div>
   );

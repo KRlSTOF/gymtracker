@@ -80,7 +80,7 @@ function localDateKey(date = new Date()) {
 }
 
 export default function SettingsScreen() {
-  const { blocks, exercises, refreshExercises, refreshBlocks, refreshSettings } = useApp();
+  const { blocks, exercises, refreshExercises, refreshBlocks, refreshSettings, restoreCurrentSession } = useApp();
   const [importStatus, setImportStatus] = useState('');
   const [settingsStatus, setSettingsStatus] = useState('');
   const [exportStatus, setExportStatus] = useState('');
@@ -183,6 +183,8 @@ export default function SettingsScreen() {
       const text = await file.text();
       const data = JSON.parse(text);
       await importFullBackup(data);
+      // Restore the imported session before exercise refresh can reconcile and persist it.
+      await restoreCurrentSession();
       await Promise.all([refreshExercises(), refreshBlocks(), refreshSettings()]);
       const restoredSettings = await getAppSettings();
       setSettings({

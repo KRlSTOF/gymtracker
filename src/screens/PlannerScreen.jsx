@@ -189,7 +189,7 @@ function sanitizeBlockForSave(block) {
 }
 
 export default function PlannerScreen() {
-  const { blocks, activeBlock, exercises, refreshBlocks, refreshExercises, setActiveBlockById } = useApp();
+  const { blocks, activeBlock, currentSession, exercises, refreshBlocks, refreshExercises, setActiveBlockById } = useApp();
   const [draftBlocks, setDraftBlocks] = useState([]);
   const [importing, setImporting] = useState(false);
   const [expandedBlock, setExpandedBlock] = useState(undefined);
@@ -201,6 +201,10 @@ export default function PlannerScreen() {
   const [dragOverExercise, setDragOverExercise] = useState(null);
   const fileRef = useRef(null);
   const muscleGroupOptions = makeMuscleGroupOptions(exercises, draftBlocks);
+
+  function hasActivePlannedSession(blockId) {
+    return currentSession?.source === 'plan' && String(currentSession.blockId) === String(blockId);
+  }
 
   useEffect(() => {
     const nextDrafts = blocks.map(normalizeBlock);
@@ -322,6 +326,10 @@ export default function PlannerScreen() {
   }
 
   async function removeBlock(id) {
+    if (hasActivePlannedSession(id)) {
+      window.alert('Finish or cancel the active workout before deleting its training block.');
+      return;
+    }
     if (!confirm('Delete this block?')) return;
 
     await deleteBlock(id);
@@ -465,6 +473,10 @@ export default function PlannerScreen() {
   }
 
   async function removeDay(blockId, dayIndex) {
+    if (hasActivePlannedSession(blockId)) {
+      window.alert('Finish or cancel the active workout before removing days from this block.');
+      return;
+    }
     const draft = draftBlocks.find(block => block.id === blockId);
     const maxIndexAfterRemoval = Math.max(0, (draft?.days.length ?? 1) - 2);
 
@@ -477,7 +489,11 @@ export default function PlannerScreen() {
     await updateDraftAndPersist(blockId, block => ({
       ...block,
       days: block.days.filter((_, index) => index !== dayIndex),
-      currentDayIndex: Math.min(block.currentDayIndex || 0, Math.max(0, block.days.length - 2))
+      currentDayIndex: (() => {
+        const current = Number(block.currentDayIndex) || 0;
+        const nextLength = Math.max(0, block.days.length - 1);
+        return current > dayIndex ? current - 1 : Math.min(current, nextLength);
+      })()
     }));
   }
 
@@ -586,6 +602,19 @@ export default function PlannerScreen() {
     setDraggingDay(null);
     setDragOverDay(null);
     if (!source || source.blockId !== blockId || source.dayIndex === dayIndex) return;
+    if (hasActivePlannedSession(blockId)) {
+      window.alert('Finish or cancel the active workout before reordering days in this block.');
+      return;
+    }
+
+    const draft = draftBlocks.find(block => block.id === blockId);
+    const currentDayIndex = Number(draft?.currentDayIndex) || 0;
+    const sourceIsCompleted = source.dayIndex < currentDayIndex;
+    const targetIsCompleted = dayIndex < currentDayIndex;
+    if (sourceIsCompleted !== targetIsCompleted) {
+      window.alert('Completed days cannot be moved across the current workout position. Change the current position first if needed.');
+      return;
+    }
 
     setSelectedDayByBlock(prev => ({ ...prev, [blockId]: dayIndex }));
     await updateDraftAndPersist(blockId, block => ({
@@ -745,6 +774,7 @@ export default function PlannerScreen() {
                       value={block.currentDayIndex}
                       onChange={e => updateBlockField(block.id, 'currentDayIndex', Number(e.target.value))}
                       onBlur={() => persistDraft(block.id)}
+                      disabled={hasActivePlannedSession(block.id)}
                     >
                       {block.days.map((day, index) => (
                         <option key={`${block.id}-position-${index}`} value={index}>

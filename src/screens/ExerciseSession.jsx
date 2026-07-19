@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext.jsx';
-import { getLogsByExercise, getHistoryByExercise, getAllLogs, addLog, updateLog, updateExercise, getExerciseByName } from '../data/db.js';
+import { getLogsByExercise, getHistoryByExercise, getAllLogs, addLogOnce, updateLog, updateExercise, getExerciseByName } from '../data/db.js';
 import { findReference } from '../data/calculations.js';
 import { RIR_OPTIONS, normalizeRIROption } from '../data/csvImport.js';
 import styles from './ExerciseSession.module.css';
@@ -69,6 +69,9 @@ export default function ExerciseSession() {
   const [compromisedForm, setCompromisedForm] = useState(Boolean(savedDraft.compromisedForm));
   const [editingSetIndex, setEditingSetIndex] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+  const [isSavingSet, setIsSavingSet] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const saveInFlightRef = useRef(false);
   const [reference, setReference] = useState({ exactMatch: null, anyMatch: null });
   const [sessionStart] = useState(currentSession?.sessionStart || Date.now());
   const [sessionId] = useState(currentSession?.sessionId || `session-${Date.now()}`);
@@ -308,6 +311,22 @@ export default function ExerciseSession() {
   }
 
   async function confirmSet() {
+    if (saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
+    setIsSavingSet(true);
+    setSaveError('');
+
+    try {
+      await confirmSetInternal();
+    } catch (error) {
+      setSaveError(error?.message || 'Set could not be saved. Please try again.');
+    } finally {
+      saveInFlightRef.current = false;
+      setIsSavingSet(false);
+    }
+  }
+
+  async function confirmSetInternal() {
     const previousSessionLogs = currentSession?.sessionLogs || [];
     const sessionExerciseId = exercise.sessionExerciseId || `legacy-${dayIdx}-${exIdx}`;
     const loggedWeight = parseFloat(weight) || 0;
@@ -344,10 +363,21 @@ export default function ExerciseSession() {
       timestamp: Date.now()
     };
 
-    const id = await addLog(setData);
-    const savedSet = { ...setData, id };
-    const updatedExerciseSets = [...completedSets, savedSet];
-    const updatedSessionLogs = [...previousSessionLogs, savedSet];
+    const result = await addLogOnce(setData);
+    const savedSet = result.log;
+    const matchesSavedSet = set => (
+      set.id === savedSet.id || (
+        set.sessionId === savedSet.sessionId &&
+        set.sessionExerciseId === savedSet.sessionExerciseId &&
+        Number(set.setNumber) === Number(savedSet.setNumber)
+      )
+    );
+    const updatedExerciseSets = completedSets.some(matchesSavedSet)
+      ? completedSets.map(set => matchesSavedSet(set) ? savedSet : set)
+      : [...completedSets, savedSet];
+    const updatedSessionLogs = previousSessionLogs.some(matchesSavedSet)
+      ? previousSessionLogs.map(set => matchesSavedSet(set) ? savedSet : set)
+      : [...previousSessionLogs, savedSet];
     setCompletedSets(updatedExerciseSets);
 
     const isLastSet = updatedExerciseSets.length >= totalSets;
@@ -704,9 +734,12 @@ export default function ExerciseSession() {
           </div>
         )}
         {!targetReached ? (
-          <button className={styles.confirmBtn} onClick={confirmSet}>
-            Confirm Set
-          </button>
+          <>
+            {saveError && <p className={styles.saveError} role="alert">{saveError}</p>}
+            <button className={styles.confirmBtn} onClick={confirmSet} disabled={isSavingSet}>
+              {isSavingSet ? 'Saving...' : 'Confirm Set'}
+            </button>
+          </>
         ) : (
           <button className={styles.confirmBtn} onClick={() => navigate('/')}>
             Back to workout

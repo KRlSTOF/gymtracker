@@ -730,6 +730,18 @@
   flex-shrink: 0;
 }
 
+.saveError {
+  margin: 0 0 8px;
+  color: var(--danger);
+  font-size: 12px;
+  text-align: center;
+}
+
+.confirmBtn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .nextExercise {
   margin-bottom: 12px;
   padding: 10px 14px;

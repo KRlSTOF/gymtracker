@@ -1,14 +1,14 @@
 import { openDB } from 'idb';
 
 const DB_NAME = 'gym-tracker';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise;
 
 function getDB() {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion, newVersion, transaction) {
         // Exercise Library
         if (!db.objectStoreNames.contains('exercises')) {
           const store = db.createObjectStore('exercises', { keyPath: 'id', autoIncrement: true });
@@ -27,6 +27,22 @@ function getDB() {
           store.createIndex('exerciseId', 'exerciseId');
           store.createIndex('date', 'date');
           store.createIndex('exerciseDate', ['exerciseId', 'date']);
+        }
+
+        if (oldVersion < 2) {
+          const store = transaction.objectStore('logs');
+          if (!store.indexNames.contains('sessionId')) {
+            store.createIndex('sessionId', 'sessionId');
+          }
+          if (!store.indexNames.contains('sessionExerciseId')) {
+            store.createIndex('sessionExerciseId', 'sessionExerciseId');
+          }
+          if (!store.indexNames.contains('sessionExercise')) {
+            store.createIndex('sessionExercise', ['sessionId', 'sessionExerciseId']);
+          }
+          if (!store.indexNames.contains('sessionSet')) {
+            store.createIndex('sessionSet', ['sessionId', 'sessionExerciseId', 'setNumber']);
+          }
         }
 
         // Historical Logs (FitNotes import)
@@ -105,9 +121,36 @@ export async function addLog(log) {
   return db.add('logs', log);
 }
 
+export async function addLogOnce(log) {
+  const db = await getDB();
+  const tx = db.transaction('logs', 'readwrite');
+  const key = [log.sessionId, log.sessionExerciseId, Number(log.setNumber)];
+  const canIdentifySet = key[0] && key[1] && Number.isFinite(key[2]);
+  const existing = canIdentifySet ? await tx.store.index('sessionSet').get(key) : null;
+
+  if (existing) {
+    await tx.done;
+    return { id: existing.id, created: false, log: existing };
+  }
+
+  const id = await tx.store.add(log);
+  await tx.done;
+  return { id, created: true, log: { ...log, id } };
+}
+
 export async function getLogsByExercise(exerciseId) {
   const db = await getDB();
   return db.getAllFromIndex('logs', 'exerciseId', exerciseId);
+}
+
+export async function getLogsBySession(sessionId) {
+  const db = await getDB();
+  return db.getAllFromIndex('logs', 'sessionId', sessionId);
+}
+
+export async function getLogsBySessionExercise(sessionId, sessionExerciseId) {
+  const db = await getDB();
+  return db.getAllFromIndex('logs', 'sessionExercise', [sessionId, sessionExerciseId]);
 }
 
 export async function getLogsByDate(date) {
@@ -123,6 +166,22 @@ export async function getAllLogs() {
 export async function updateLog(log) {
   const db = await getDB();
   return db.put('logs', log);
+}
+
+export async function deleteLogsBySessionExercise(sessionId, sessionExerciseId) {
+  const db = await getDB();
+  const tx = db.transaction('logs', 'readwrite');
+  let cursor = await tx.store.index('sessionExercise').openCursor([sessionId, sessionExerciseId]);
+  let deleted = 0;
+
+  while (cursor) {
+    await cursor.delete();
+    deleted += 1;
+    cursor = await cursor.continue();
+  }
+
+  await tx.done;
+  return deleted;
 }
 
 // === Historical Logs ===
@@ -187,12 +246,22 @@ export async function setAppSettings(settings) {
 // === Export All Data ===
 export async function exportAllData() {
   const db = await getDB();
+  const tx = db.transaction(['exercises', 'blocks', 'logs', 'history', 'settings'], 'readonly');
+  const [exercises, blocks, logs, history, settings] = await Promise.all([
+    tx.objectStore('exercises').getAll(),
+    tx.objectStore('blocks').getAll(),
+    tx.objectStore('logs').getAll(),
+    tx.objectStore('history').getAll(),
+    tx.objectStore('settings').getAll()
+  ]);
+  await tx.done;
   return {
-    exercises: await db.getAll('exercises'),
-    blocks: await db.getAll('blocks'),
-    logs: await db.getAll('logs'),
-    history: await db.getAll('history'),
-    settings: await db.getAll('settings'),
+    schemaVersion: 2,
+    exercises,
+    blocks,
+    logs,
+    history,
+    settings,
     exportDate: new Date().toISOString()
   };
 }
@@ -200,42 +269,60 @@ export async function exportAllData() {
 // === Import Full Backup ===
 export async function importFullBackup(data) {
   const db = await getDB();
-  if (data.exercises) {
-    const tx = db.transaction('exercises', 'readwrite');
-    await tx.store.clear();
-    for (const item of data.exercises) tx.store.add(item);
-    await tx.done;
+  validateFullBackup(data);
+
+  const storeNames = ['exercises', 'blocks', 'logs', 'history', 'settings'];
+  const tx = db.transaction(storeNames, 'readwrite');
+
+  for (const storeName of storeNames) {
+    await tx.objectStore(storeName).clear();
   }
-  if (data.blocks) {
-    const tx = db.transaction('blocks', 'readwrite');
-    await tx.store.clear();
-    for (const item of data.blocks) tx.store.add(item);
-    await tx.done;
-  }
-  if (data.logs) {
-    const tx = db.transaction('logs', 'readwrite');
-    await tx.store.clear();
-    for (const item of data.logs) tx.store.add(item);
-    await tx.done;
-  }
-  if (data.history) {
-    const tx = db.transaction('history', 'readwrite');
-    await tx.store.clear();
-    for (const item of data.history) tx.store.add(item);
-    await tx.done;
-  }
-  if (data.settings) {
-    const tx = db.transaction('settings', 'readwrite');
-    await tx.store.clear();
-    if (Array.isArray(data.settings)) {
-      for (const item of data.settings) {
-        if (item?.key) tx.store.put(item);
-      }
-    } else {
-      for (const [key, value] of Object.entries(data.settings)) {
-        tx.store.put({ key, value });
-      }
+  for (const item of data.exercises) await tx.objectStore('exercises').put(item);
+  for (const item of data.blocks) await tx.objectStore('blocks').put(item);
+  for (const item of data.logs) await tx.objectStore('logs').put(item);
+  for (const item of data.history) await tx.objectStore('history').put(item);
+
+  if (Array.isArray(data.settings)) {
+    for (const item of data.settings) {
+      if (item?.key) await tx.objectStore('settings').put(item);
     }
-    await tx.done;
+  } else {
+    for (const [key, value] of Object.entries(data.settings)) {
+      await tx.objectStore('settings').put({ key, value });
+    }
+  }
+
+  await tx.done;
+}
+
+function validateFullBackup(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('Backup must be a JSON object.');
+  }
+
+  for (const key of ['exercises', 'blocks', 'logs', 'history']) {
+    if (!Array.isArray(data[key])) {
+      throw new Error(`Backup is missing a valid ${key} collection.`);
+    }
+    if (data[key].some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+      throw new Error(`Backup contains an invalid ${key} record.`);
+    }
+    const ids = data[key].filter(item => item.id !== undefined).map(item => String(item.id));
+    if (new Set(ids).size !== ids.length) {
+      throw new Error(`Backup contains duplicate ${key} IDs.`);
+    }
+  }
+
+  const validSettings = Array.isArray(data.settings) || (
+    data.settings && typeof data.settings === 'object'
+  );
+  if (!validSettings) {
+    throw new Error('Backup is missing valid settings.');
+  }
+  if (Array.isArray(data.settings)) {
+    const keys = data.settings.map(item => item?.key).filter(Boolean);
+    if (keys.length !== data.settings.length || new Set(keys).size !== keys.length) {
+      throw new Error('Backup contains invalid or duplicate setting keys.');
+    }
   }
 }
