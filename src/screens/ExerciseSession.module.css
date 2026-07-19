@@ -391,6 +391,10 @@
   margin-bottom: 20px;
 }
 
+.completedSetWrap {
+  margin-bottom: 6px;
+}
+
 .completedSet {
   display: flex;
   justify-content: space-between;
@@ -399,8 +403,91 @@
   background: rgba(16, 185, 129, 0.06);
   border: 1px solid rgba(16, 185, 129, 0.12);
   border-radius: var(--radius-sm);
-  margin-bottom: 6px;
   font-size: 13px;
+}
+
+.editSetBtn {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 8px;
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--success);
+  font-weight: 600;
+}
+
+.editSetPanel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(16, 185, 129, 0.18);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.editSetPanel > label:not(.editFormFlag) {
+  display: grid;
+  gap: 5px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.editSetPanel input[type="number"] {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 16px;
+}
+
+.editRirOptions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.editRirOptions button,
+.editSetActions button {
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+}
+
+.editRirOptions button.selected {
+  border-color: var(--accent);
+  background: rgba(59, 130, 246, 0.14);
+  color: var(--accent-light);
+}
+
+.editFormFlag {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.editSetActions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.editSetActions button:last-child {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: white;
 }
 
 .check {

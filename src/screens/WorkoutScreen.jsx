@@ -418,12 +418,8 @@ export default function WorkoutScreen() {
       if (i !== index) return item;
       return snapshotExercise({
         ...replacement,
-        targetSets: item.targetSets,
-        targetReps: item.targetReps,
-        targetWeight: item.targetWeight,
-        targetRIR: item.targetRIR,
-        weightStep: replacement.weightStep ?? item.weightStep,
-        restTimer: replacement.restTimer ?? item.restTimer
+        weightStep: replacement.weightStep ?? appSettings.defaultWeightStep,
+        restTimer: replacement.restTimer ?? appSettings.defaultRestTimer
       }, {
         sessionExerciseId: item.sessionExerciseId,
         sourceExerciseIndex: item.sourceExerciseIndex,
@@ -519,6 +515,8 @@ export default function WorkoutScreen() {
         <div className={styles.addPanel}>
           <input
             type="search"
+            autoComplete="off"
+            name="add-session-exercise"
             value={exerciseQuery}
             onChange={event => setExerciseQuery(event.target.value)}
             placeholder="Search library to add exercise"
@@ -651,7 +649,8 @@ export default function WorkoutScreen() {
                 <div className={styles.rowTools}>
                   <input
                     type="search"
-                    list={`switch-options-${i}`}
+                    autoComplete="off"
+                    name={`switch-session-exercise-${i}`}
                     value={switchQueries[i] || ''}
                     onChange={event => {
                       const value = event.target.value;
@@ -660,11 +659,20 @@ export default function WorkoutScreen() {
                     }}
                     placeholder="Search to switch exercise"
                   />
-                  <datalist id={`switch-options-${i}`}>
-                    {exercises.map(option => (
-                      <option key={option.id} value={option.name}>{option.muscleGroup || 'Uncategorized'}</option>
-                    ))}
-                  </datalist>
+                  {switchQueries[i]?.trim() && (
+                    <div className={styles.switchPickerList}>
+                      {exercises
+                        .filter(option => `${option.name} ${option.muscleGroup || ''}`.toLowerCase().includes(switchQueries[i].trim().toLowerCase()))
+                        .filter(option => String(option.id) !== String(displayExercise.libraryId))
+                        .slice(0, 6)
+                        .map(option => (
+                          <button key={option.id} type="button" onClick={() => switchSessionExerciseByName(i, option.name)}>
+                            <strong>{option.name}</strong>
+                            <span>{option.muscleGroup || 'Uncategorized'}</span>
+                          </button>
+                        ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useCallback, useContext, useState, useEffect } from 'react';
 import * as db from '../data/db.js';
 
 const AppContext = createContext(null);
@@ -6,6 +6,28 @@ const DEFAULT_APP_SETTINGS = {
   defaultRestTimer: 120,
   defaultWeightStep: 2.5
 };
+const ACTIVE_SESSION_STORAGE_KEY = 'gym-tracker-active-session';
+
+function loadLocalSession() {
+  try {
+    const value = window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+    return value ? JSON.parse(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalSession(session) {
+  try {
+    if (session) {
+      window.localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, JSON.stringify(session));
+    } else {
+      window.localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+    }
+  } catch {
+    // IndexedDB remains the fallback when localStorage is unavailable.
+  }
+}
 
 export function useApp() {
   return useContext(AppContext);
@@ -15,22 +37,24 @@ export function AppProvider({ children }) {
   const [exercises, setExercises] = useState([]);
   const [blocks, setBlocks] = useState([]);
   const [activeBlock, setActiveBlock] = useState(null);
-  const [currentSession, setCurrentSession] = useState(null);
+  const [currentSession, setCurrentSessionState] = useState(loadLocalSession);
   const [appSettings, setAppSettingsState] = useState(DEFAULT_APP_SETTINGS);
   const [loading, setLoading] = useState(true);
 
   // Load initial data
   useEffect(() => {
     async function init() {
-      const [exs, blks, activeBlockId, storedSettings] = await Promise.all([
+      const [exs, blks, activeBlockId, storedSettings, storedSession] = await Promise.all([
         db.getAllExercises(),
         db.getAllBlocks(),
         db.getSetting('activeBlockId'),
-        db.getAppSettings()
+        db.getAppSettings(),
+        db.getSetting('currentSession')
       ]);
       setExercises(exs);
       setBlocks(blks);
       setAppSettingsState(normalizeSettings(storedSettings));
+      setCurrentSessionState(current => current || storedSession || null);
       if (activeBlockId) {
         const block = await db.getBlock(activeBlockId);
         setActiveBlock(block);
@@ -38,6 +62,17 @@ export function AppProvider({ children }) {
       setLoading(false);
     }
     init();
+  }, []);
+
+  const setCurrentSession = useCallback(nextSession => {
+    setCurrentSessionState(previousSession => {
+      const resolvedSession = typeof nextSession === 'function'
+        ? nextSession(previousSession)
+        : nextSession;
+      saveLocalSession(resolvedSession);
+      db.setSetting('currentSession', resolvedSession || null).catch(() => {});
+      return resolvedSession;
+    });
   }, []);
 
   // Refresh exercises

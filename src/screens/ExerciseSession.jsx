@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext.jsx';
-import { getLogsByExercise, getHistoryByExercise, getAllLogs, addLog, updateExercise, getExerciseByName } from '../data/db.js';
+import { getLogsByExercise, getHistoryByExercise, getAllLogs, addLog, updateLog, updateExercise, getExerciseByName } from '../data/db.js';
 import { findReference } from '../data/calculations.js';
 import { RIR_OPTIONS, normalizeRIROption } from '../data/csvImport.js';
 import styles from './ExerciseSession.module.css';
@@ -55,17 +55,20 @@ export default function ExerciseSession() {
   const priorExerciseSets = usingSessionQueue
     ? (currentSession.sessionLogs || []).filter(log => log.sessionExerciseId === exercise?.sessionExerciseId)
     : [];
+  const savedDraft = currentSession?.exerciseDrafts?.[exercise?.sessionExerciseId] || {};
 
   const [completedSets, setCompletedSets] = useState(priorExerciseSets);
-  const [weight, setWeight] = useState(String(exercise?.targetWeight ?? 0));
-  const [reps, setReps] = useState(String(exercise?.targetReps ?? 10));
-  const [rir, setRIR] = useState(normalizeRIROption(exercise?.targetRIR, '2'));
-  const [exerciseNote, setExerciseNote] = useState('');
+  const [weight, setWeight] = useState(String(savedDraft.weight ?? exercise?.targetWeight ?? 0));
+  const [reps, setReps] = useState(String(savedDraft.reps ?? exercise?.targetReps ?? 10));
+  const [rir, setRIR] = useState(normalizeRIROption(savedDraft.rir ?? exercise?.targetRIR, '2'));
+  const [exerciseNote, setExerciseNote] = useState(savedDraft.exerciseNote || '');
   const [notesOpen, setNotesOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [noteHistory, setNoteHistory] = useState([]);
   const [noteStatus, setNoteStatus] = useState('');
-  const [compromisedForm, setCompromisedForm] = useState(false);
+  const [compromisedForm, setCompromisedForm] = useState(Boolean(savedDraft.compromisedForm));
+  const [editingSetIndex, setEditingSetIndex] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
   const [reference, setReference] = useState({ exactMatch: null, anyMatch: null });
   const [sessionStart] = useState(currentSession?.sessionStart || Date.now());
   const [sessionId] = useState(currentSession?.sessionId || `session-${Date.now()}`);
@@ -73,6 +76,20 @@ export default function ExerciseSession() {
   const currentSet = completedSets.length + 1;
   const totalSets = exercise?.targetSets || 3;
   const weightStep = exercise?.weightStep || libraryExercise?.weightStep || appSettings.defaultWeightStep || 2.5;
+
+  function updateExerciseDraft(patch) {
+    if (!exercise?.sessionExerciseId) return;
+    setCurrentSession(session => session ? {
+      ...session,
+      exerciseDrafts: {
+        ...(session.exerciseDrafts || {}),
+        [exercise.sessionExerciseId]: {
+          ...(session.exerciseDrafts?.[exercise.sessionExerciseId] || {}),
+          ...patch
+        }
+      }
+    } : session);
+  }
 
   useEffect(() => {
     setCompletedSets(priorExerciseSets);
@@ -85,25 +102,27 @@ export default function ExerciseSession() {
       setNoteHistory([]);
       const allLogs = await getAllLogs();
       let matchedLogs = [];
+      const today = localDateKey();
 
       if (exercise.libraryId) {
         const logs = await getLogsByExercise(exercise.libraryId);
-        matchedLogs = logs;
-        if (logs.length > 0) {
-          setReference(findReference(logs, exercise.targetRIR));
+        matchedLogs = logs.filter(log => log.date && log.date < today);
+        if (matchedLogs.length > 0) {
+          setReference(findReference(matchedLogs, exercise.targetRIR));
         }
       }
 
       if (matchedLogs.length === 0) {
-        matchedLogs = allLogs.filter(log => log.exerciseName === exercise.name);
+        matchedLogs = allLogs.filter(log => log.exerciseName === exercise.name && log.date && log.date < today);
         if (matchedLogs.length > 0) {
           setReference(findReference(matchedLogs, exercise.targetRIR));
         }
       }
 
       const history = await getHistoryByExercise(exercise.name);
-      if (matchedLogs.length === 0 && history.length > 0) {
-        const sorted = [...history].sort((a, b) => new Date(b.date) - new Date(a.date));
+      const previousHistory = history.filter(item => item.date && item.date < today);
+      if (matchedLogs.length === 0 && previousHistory.length > 0) {
+        const sorted = [...previousHistory].sort((a, b) => new Date(b.date) - new Date(a.date));
         setReference({ exactMatch: null, anyMatch: sorted[0] });
       }
 
@@ -150,14 +169,15 @@ export default function ExerciseSession() {
   useEffect(() => {
     if (exercise) {
       const target = getSetTarget(completedSets.length + 1);
-      setWeight(String(target.weight ?? ''));
-      setReps(String(target.reps ?? ''));
-      setRIR(normalizeRIROption(target.rir, '2'));
-      setExerciseNote('');
+      const draft = currentSession?.exerciseDrafts?.[exercise.sessionExerciseId] || {};
+      setWeight(String(draft.weight ?? target.weight ?? ''));
+      setReps(String(draft.reps ?? target.reps ?? ''));
+      setRIR(normalizeRIROption(draft.rir ?? target.rir, '2'));
+      setExerciseNote(draft.exerciseNote || '');
       setNotesOpen(false);
       setHistoryOpen(false);
       setNoteStatus('');
-      setCompromisedForm(false);
+      setCompromisedForm(Boolean(draft.compromisedForm));
     }
   }, [completedSets.length, exercise, libraryExercise]);
 
@@ -201,9 +221,68 @@ export default function ExerciseSession() {
 
   function quickFillFromLast() {
     if (!lastReference) return;
-    setWeight(String(Number(lastReference.weight) || 0));
-    setReps(String(Number(lastReference.reps) || 0));
-    setRIR(normalizeRIROption(lastReference.rir || exercise.targetRIR, '2'));
+    const nextWeight = String(Number(lastReference.weight) || 0);
+    const nextReps = String(Number(lastReference.reps) || 0);
+    const nextRir = normalizeRIROption(lastReference.rir || exercise.targetRIR, '2');
+    setWeight(nextWeight);
+    setReps(nextReps);
+    setRIR(nextRir);
+    updateExerciseDraft({ weight: nextWeight, reps: nextReps, rir: nextRir });
+  }
+
+  function startEditingSet(index) {
+    const set = completedSets[index];
+    if (!set) return;
+    setEditingSetIndex(index);
+    setEditDraft({
+      weight: String(set.weight ?? ''),
+      reps: String(set.reps ?? ''),
+      rir: normalizeRIROption(set.rir, '2'),
+      compromisedForm: Boolean(set.compromisedForm)
+    });
+  }
+
+  async function saveEditedSet() {
+    const original = completedSets[editingSetIndex];
+    if (!original || !editDraft) return;
+
+    let persisted = original;
+    if (!persisted.id) {
+      const allLogs = await getAllLogs();
+      persisted = allLogs.find(log => (
+        log.sessionId === original.sessionId &&
+        log.sessionExerciseId === original.sessionExerciseId &&
+        log.setNumber === original.setNumber &&
+        log.timestamp === original.timestamp
+      )) || original;
+    }
+
+    const updated = {
+      ...persisted,
+      weight: parseFloat(editDraft.weight) || 0,
+      reps: parseInt(editDraft.reps, 10) || 0,
+      rir: normalizeRIROption(editDraft.rir, '2'),
+      compromisedForm: Boolean(editDraft.compromisedForm),
+      updatedAt: Date.now()
+    };
+
+    if (updated.id) await updateLog(updated);
+
+    setCompletedSets(sets => sets.map((set, index) => index === editingSetIndex ? updated : set));
+    setCurrentSession(session => session ? {
+      ...session,
+      sessionLogs: (session.sessionLogs || []).map(log => (
+        (updated.id && log.id === updated.id) || log.timestamp === original.timestamp ? updated : log
+      )),
+      exerciseSets: (session.exerciseSets || []).map(log => (
+        (updated.id && log.id === updated.id) || log.timestamp === original.timestamp ? updated : log
+      )),
+      completedSets: (session.completedSets || []).map(log => (
+        (updated.id && log.id === updated.id) || log.timestamp === original.timestamp ? updated : log
+      ))
+    } : session);
+    setEditingSetIndex(null);
+    setEditDraft(null);
   }
 
   async function saveExerciseNote() {
@@ -265,9 +344,10 @@ export default function ExerciseSession() {
       timestamp: Date.now()
     };
 
-    await addLog(setData);
-    const updatedExerciseSets = [...completedSets, setData];
-    const updatedSessionLogs = [...previousSessionLogs, setData];
+    const id = await addLog(setData);
+    const savedSet = { ...setData, id };
+    const updatedExerciseSets = [...completedSets, savedSet];
+    const updatedSessionLogs = [...previousSessionLogs, savedSet];
     setCompletedSets(updatedExerciseSets);
 
     const isLastSet = updatedExerciseSets.length >= totalSets;
@@ -276,6 +356,8 @@ export default function ExerciseSession() {
       ? { type: 'exercise', exerciseIndex: exIdx + 1, dayId }
       : { type: 'set', setNumber: currentSet + 1, exercise: exercise.name, target: nextTarget };
 
+    const nextDrafts = { ...(currentSession?.exerciseDrafts || {}) };
+    delete nextDrafts[sessionExerciseId];
     setCurrentSession({
       ...(currentSession || {}),
       sessionId,
@@ -285,6 +367,7 @@ export default function ExerciseSession() {
       exerciseSets: updatedExerciseSets,
       completedSets: updatedExerciseSets,
       sessionLogs: updatedSessionLogs,
+      exerciseDrafts: nextDrafts,
       sessionStart,
       next: nextInfo,
       exercise: { ...exercise, note: exerciseNote.trim() },
@@ -323,14 +406,23 @@ export default function ExerciseSession() {
     setWeight(String(nextSet.targetWeight ?? ''));
     setReps(String(nextSet.targetReps ?? ''));
     setRIR(normalizeRIROption(nextSet.targetRIR, '2'));
+    updateExerciseDraft({
+      weight: String(nextSet.targetWeight ?? ''),
+      reps: String(nextSet.targetReps ?? ''),
+      rir: normalizeRIROption(nextSet.targetRIR, '2')
+    });
   }
 
   function adjustWeight(delta) {
-    setWeight(prev => String(Math.max(0, +(Number(prev || 0) + delta * weightStep).toFixed(1))));
+    const next = String(Math.max(0, +(Number(weight || 0) + delta * weightStep).toFixed(1)));
+    setWeight(next);
+    updateExerciseDraft({ weight: next });
   }
 
   function adjustReps(delta) {
-    setReps(prev => String(Math.max(0, Number(prev || 0) + delta)));
+    const next = String(Math.max(0, Number(reps || 0) + delta));
+    setReps(next);
+    updateExerciseDraft({ reps: next });
   }
 
   return (
@@ -420,7 +512,10 @@ export default function ExerciseSession() {
                 <textarea
                   rows="3"
                   value={exerciseNote}
-                  onChange={event => setExerciseNote(event.target.value)}
+                  onChange={event => {
+                    setExerciseNote(event.target.value);
+                    updateExerciseDraft({ exerciseNote: event.target.value });
+                  }}
                   placeholder="Technique cues, setup reminders, or planner pointers..."
                 />
                 <div className={styles.noteActions}>
@@ -455,12 +550,62 @@ export default function ExerciseSession() {
           {completedSets.length > 0 && (
             <div className={styles.completedSection}>
               {completedSets.map((s, i) => (
-                <div key={i} className={styles.completedSet}>
-                  <span>
-                    Set {i + 1} - {s.weight} kg x {s.reps} @ RIR {s.rir}
-                    {s.compromisedForm ? ' - form flagged' : ''}
-                  </span>
-                  <span className={styles.check} role="img" aria-label="Set complete" />
+                <div key={s.id || s.timestamp || i} className={styles.completedSetWrap}>
+                  <div className={styles.completedSet}>
+                    <span>
+                      Set {i + 1} - {s.weight} kg x {s.reps} @ RIR {s.rir}
+                      {s.compromisedForm ? ' - form flagged' : ''}
+                    </span>
+                    <button className={styles.editSetBtn} type="button" onClick={() => startEditingSet(i)}>
+                      Edit
+                    </button>
+                  </div>
+                  {editingSetIndex === i && editDraft && (
+                    <div className={styles.editSetPanel}>
+                      <label>
+                        Weight
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          value={editDraft.weight}
+                          onChange={event => setEditDraft(draft => ({ ...draft, weight: event.target.value }))}
+                        />
+                      </label>
+                      <label>
+                        Reps
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          value={editDraft.reps}
+                          onChange={event => setEditDraft(draft => ({ ...draft, reps: event.target.value }))}
+                        />
+                      </label>
+                      <div className={styles.editRirOptions}>
+                        {RIR_OPTIONS.map(option => (
+                          <button
+                            key={option}
+                            type="button"
+                            className={editDraft.rir === option ? styles.selected : ''}
+                            onClick={() => setEditDraft(draft => ({ ...draft, rir: option }))}
+                          >
+                            RIR {option}
+                          </button>
+                        ))}
+                      </div>
+                      <label className={styles.editFormFlag}>
+                        <input
+                          type="checkbox"
+                          checked={editDraft.compromisedForm}
+                          onChange={event => setEditDraft(draft => ({ ...draft, compromisedForm: event.target.checked }))}
+                        />
+                        Form compromised
+                      </label>
+                      <div className={styles.editSetActions}>
+                        <button type="button" onClick={() => { setEditingSetIndex(null); setEditDraft(null); }}>Cancel</button>
+                        <button type="button" onClick={saveEditedSet}>Save changes</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -478,7 +623,10 @@ export default function ExerciseSession() {
                     type="number"
                     inputMode="decimal"
                     value={weight}
-                    onChange={e => setWeight(e.target.value)}
+                    onChange={e => {
+                      setWeight(e.target.value);
+                      updateExerciseDraft({ weight: e.target.value });
+                    }}
                   />
                   <button onClick={() => adjustWeight(1)}>+</button>
                 </div>
@@ -491,7 +639,10 @@ export default function ExerciseSession() {
                     type="number"
                     inputMode="numeric"
                     value={reps}
-                    onChange={e => setReps(e.target.value)}
+                    onChange={e => {
+                      setReps(e.target.value);
+                      updateExerciseDraft({ reps: e.target.value });
+                    }}
                   />
                   <button onClick={() => adjustReps(1)}>+</button>
                 </div>
@@ -512,7 +663,10 @@ export default function ExerciseSession() {
                   <button
                     key={option}
                     className={`${styles.rirOption} ${rir === option ? styles.selected : ''}`}
-                    onClick={() => setRIR(option)}
+                    onClick={() => {
+                      setRIR(option);
+                      updateExerciseDraft({ rir: option });
+                    }}
                   >
                     {option}
                   </button>
@@ -524,7 +678,10 @@ export default function ExerciseSession() {
               <input
                 type="checkbox"
                 checked={compromisedForm}
-                onChange={e => setCompromisedForm(e.target.checked)}
+                onChange={e => {
+                  setCompromisedForm(e.target.checked);
+                  updateExerciseDraft({ compromisedForm: e.target.checked });
+                }}
               />
               <span>Form compromised</span>
             </label>}

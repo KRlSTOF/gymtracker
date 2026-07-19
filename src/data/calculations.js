@@ -386,7 +386,15 @@ export function buildWeeklySessionStreak(logs, plannedSessionsPerWeek) {
 
 // Find reference performance for an exercise at given RIR.
 export function findReference(logs, targetRIR) {
-  const sorted = [...logs].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const sorted = [...logs].sort((a, b) => {
+    const timestampDifference = Number(b.timestamp || 0) - Number(a.timestamp || 0);
+    if (timestampDifference) return timestampDifference;
+
+    const dateDifference = new Date(b.date) - new Date(a.date);
+    if (dateDifference) return dateDifference;
+
+    return Number(b.setNumber || 0) - Number(a.setNumber || 0);
+  });
 
   const exactMatch = sorted.find(l => l.rir === targetRIR);
   const anyMatch = sorted[0];

@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.kristof.gymtracker',
+  appId: 'com.gymtracker.app',
   appName: 'GymTracker',
   webDir: 'dist'
 };

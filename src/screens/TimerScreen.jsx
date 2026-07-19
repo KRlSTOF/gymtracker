@@ -44,7 +44,7 @@ export default function TimerScreen() {
       if (nextExIdx < sessionExercises.length) {
         navigate(`/exercise/${currentSession.dayId}/${nextExIdx}`);
       } else {
-        navigate(`/summary/${currentSession.dayId}`);
+        navigate('/');
       }
     } else {
       navigate(`/exercise/${currentSession.dayId}/${currentSession.exerciseIndex}`);

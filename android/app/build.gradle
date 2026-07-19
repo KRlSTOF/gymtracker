@@ -1,5 +1,8 @@
 apply plugin: 'com.android.application'
 
+def gymTrackerVersionCode = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+def gymTrackerKeystorePath = System.getenv('GYMTRACKER_KEYSTORE_PATH')
+
 android {
     namespace = "com.gymtracker.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +10,8 @@ android {
         applicationId "com.gymtracker.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode gymTrackerVersionCode
+        versionName "1.0.${gymTrackerVersionCode}"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +19,21 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (gymTrackerKeystorePath) {
+                storeFile file(gymTrackerKeystorePath)
+                storePassword System.getenv('GYMTRACKER_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('GYMTRACKER_KEY_ALIAS')
+                keyPassword System.getenv('GYMTRACKER_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (gymTrackerKeystorePath) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

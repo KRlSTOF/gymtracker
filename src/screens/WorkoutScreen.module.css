@@ -361,6 +361,30 @@
   grid-column: auto;
 }
 
+.switchPickerList {
+  display: grid;
+  gap: 6px;
+}
+
+.switchPickerList button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.switchPickerList button strong {
+  color: var(--text-primary);
+}
+
+.switchPickerList button span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .finishActions {
   width: 100%;
   max-width: 520px;

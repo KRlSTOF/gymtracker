@@ -34,16 +34,34 @@ jobs:
       - name: Sync Capacitor Android project
         run: npx cap sync android
 
+      - name: Restore permanent Android signing key
+        env:
+          GYMTRACKER_KEYSTORE_BASE64: ${{ secrets.GYMTRACKER_KEYSTORE_BASE64 }}
+          GYMTRACKER_KEYSTORE_PASSWORD: ${{ secrets.GYMTRACKER_KEYSTORE_PASSWORD }}
+          GYMTRACKER_KEY_ALIAS: ${{ secrets.GYMTRACKER_KEY_ALIAS }}
+          GYMTRACKER_KEY_PASSWORD: ${{ secrets.GYMTRACKER_KEY_PASSWORD }}
+        run: |
+          if [ -z "$GYMTRACKER_KEYSTORE_BASE64" ] || [ -z "$GYMTRACKER_KEYSTORE_PASSWORD" ] || [ -z "$GYMTRACKER_KEY_ALIAS" ] || [ -z "$GYMTRACKER_KEY_PASSWORD" ]; then
+            echo "Missing Android signing secrets. Follow APK_UPDATES.md once to configure update-safe signing."
+            exit 1
+          fi
+          echo "$GYMTRACKER_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/gymtracker-release.jks"
+
       - name: Make Gradle executable
         run: chmod +x android/gradlew
 
-      - name: Build debug APK
+      - name: Build signed release APK
+        env:
+          GYMTRACKER_KEYSTORE_PATH: ${{ runner.temp }}/gymtracker-release.jks
+          GYMTRACKER_KEYSTORE_PASSWORD: ${{ secrets.GYMTRACKER_KEYSTORE_PASSWORD }}
+          GYMTRACKER_KEY_ALIAS: ${{ secrets.GYMTRACKER_KEY_ALIAS }}
+          GYMTRACKER_KEY_PASSWORD: ${{ secrets.GYMTRACKER_KEY_PASSWORD }}
         run: |
           cd android
-          ./gradlew assembleDebug
+          ./gradlew assembleRelease
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gymtracker-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: gymtracker-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
