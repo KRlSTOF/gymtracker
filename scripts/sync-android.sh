@@ -7,8 +7,8 @@ git pull
 echo "Installing dependencies..."
 npm install
 
-echo "Building React app..."
-npm run build
+echo "Building React app for Capacitor..."
+npm run build -- --mode capacitor
 
 echo "Syncing Capacitor Android project..."
 npx cap sync android

@@ -4,55 +4,94 @@ import { useApp } from '../context/AppContext.jsx';
 import { formatTime } from '../data/calculations.js';
 import styles from './TimerScreen.module.css';
 
+function secondsRemaining(endsAt) {
+  return Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+}
+
 export default function TimerScreen() {
   const navigate = useNavigate();
-  const { currentSession, appSettings } = useApp();
-  const [timeLeft, setTimeLeft] = useState(0);
+  const { currentSession, appSettings, loading, setCurrentSession } = useApp();
+  const [timerEndsAt, setTimerEndsAt] = useState(() => {
+    const storedEndsAt = Number(currentSession?.restTimerEndsAt);
+    return Number.isFinite(storedEndsAt) && storedEndsAt > 0 ? storedEndsAt : null;
+  });
+  const [timeLeft, setTimeLeft] = useState(() => (
+    timerEndsAt ? secondsRemaining(timerEndsAt) : 0
+  ));
   const intervalRef = useRef(null);
+  const endedRef = useRef(false);
 
   const exercise = currentSession?.exercise;
-  const restDuration = exercise?.restTimer ?? appSettings.defaultRestTimer ?? 120;
+  const restDuration = Math.max(0, Number(exercise?.restTimer ?? appSettings.defaultRestTimer ?? 120) || 0);
 
   useEffect(() => {
-    setTimeLeft(restDuration);
-
-    intervalRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(intervalRef.current);
-          handleTimerEnd();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(intervalRef.current);
-  }, []);
-
-  function handleTimerEnd() {
+    if (loading) return;
     if (!currentSession) {
-      navigate('/');
+      navigate('/', { replace: true });
       return;
     }
 
+    const storedEndsAt = Number(currentSession.restTimerEndsAt);
+    const resolvedEndsAt = Number.isFinite(storedEndsAt) && storedEndsAt > 0
+      ? storedEndsAt
+      : Date.now() + restDuration * 1000;
+
+    setTimerEndsAt(resolvedEndsAt);
+    setTimeLeft(secondsRemaining(resolvedEndsAt));
+
+    if (resolvedEndsAt !== storedEndsAt) {
+      setCurrentSession(session => session ? { ...session, restTimerEndsAt: resolvedEndsAt } : session);
+    }
+  }, [loading, currentSession?.sessionId]);
+
+  useEffect(() => {
+    if (!timerEndsAt) return undefined;
+
+    function updateTimer() {
+      const remaining = secondsRemaining(timerEndsAt);
+      setTimeLeft(remaining);
+      if (remaining === 0) handleTimerEnd();
+    }
+
+    intervalRef.current = setInterval(() => {
+      updateTimer();
+    }, 1000);
+    document.addEventListener('visibilitychange', updateTimer);
+    updateTimer();
+
+    return () => {
+      clearInterval(intervalRef.current);
+      document.removeEventListener('visibilitychange', updateTimer);
+    };
+  }, [timerEndsAt]);
+
+  function handleTimerEnd() {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    clearInterval(intervalRef.current);
+
+    if (!currentSession) {
+      navigate('/', { replace: true });
+      return;
+    }
+
+    setCurrentSession(session => session ? { ...session, restTimerEndsAt: null } : session);
     const sessionExercises = currentSession.sessionExercises || [];
 
     if (currentSession.isLastSet) {
       const nextExIdx = currentSession.next?.exerciseIndex ?? currentSession.exerciseIndex + 1;
 
       if (nextExIdx < sessionExercises.length) {
-        navigate(`/exercise/${currentSession.dayId}/${nextExIdx}`);
+        navigate(`/exercise/${currentSession.dayId}/${nextExIdx}`, { replace: true });
       } else {
-        navigate('/');
+        navigate('/', { replace: true });
       }
     } else {
-      navigate(`/exercise/${currentSession.dayId}/${currentSession.exerciseIndex}`);
+      navigate(`/exercise/${currentSession.dayId}/${currentSession.exerciseIndex}`, { replace: true });
     }
   }
 
   function skipTimer() {
-    clearInterval(intervalRef.current);
     handleTimerEnd();
   }
 
@@ -79,7 +118,7 @@ export default function TimerScreen() {
         <div className={styles.next}>{nextLabel}</div>
 
         <button className={styles.skipBtn} onClick={skipTimer}>
-          Skip Timer
+          {timerEndsAt ? 'Skip Timer' : 'Preparing Timer...'}
         </button>
       </div>
     </div>

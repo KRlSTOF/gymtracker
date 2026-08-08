@@ -80,6 +80,7 @@ export default function ExerciseSession() {
   const currentSet = completedSets.length + 1;
   const totalSets = exercise?.targetSets || 3;
   const weightStep = exercise?.weightStep || libraryExercise?.weightStep || appSettings.defaultWeightStep || 2.5;
+  const restDuration = Math.max(0, Number(exercise?.restTimer ?? appSettings.defaultRestTimer ?? 120) || 0);
 
   function updateExerciseDraft(patch) {
     if (!exercise?.sessionExerciseId) return;
@@ -105,33 +106,32 @@ export default function ExerciseSession() {
       setReference({ exactMatch: null, anyMatch: null });
       setNoteHistory([]);
       const allLogs = await getAllLogs();
-      let matchedLogs = [];
+      let exerciseLogs = [];
       const today = localDateKey();
 
       if (exercise.libraryId) {
-        const logs = await getLogsByExercise(exercise.libraryId);
-        matchedLogs = logs.filter(log => log.date && log.date < today);
-        if (matchedLogs.length > 0) {
-          setReference(findReference(matchedLogs, exercise.targetRIR));
-        }
+        exerciseLogs = await getLogsByExercise(exercise.libraryId);
       }
 
-      if (matchedLogs.length === 0) {
-        matchedLogs = allLogs.filter(log => log.exerciseName === exercise.name && log.date && log.date < today);
-        if (matchedLogs.length > 0) {
-          setReference(findReference(matchedLogs, exercise.targetRIR));
-        }
+      if (exerciseLogs.length === 0) {
+        exerciseLogs = allLogs.filter(log => log.exerciseName === exercise.name);
+      }
+
+      const previousLogs = exerciseLogs.filter(log => log.date && log.date < today);
+      if (previousLogs.length > 0) {
+        setReference(findReference(previousLogs, exercise.targetRIR));
       }
 
       const history = await getHistoryByExercise(exercise.name);
       const previousHistory = history.filter(item => item.date && item.date < today);
-      if (matchedLogs.length === 0 && previousHistory.length > 0) {
+      if (previousLogs.length === 0 && previousHistory.length > 0) {
         const sorted = [...previousHistory].sort((a, b) => new Date(b.date) - new Date(a.date));
         setReference({ exactMatch: null, anyMatch: sorted[0] });
       }
 
       const notes = [
-        ...matchedLogs
+        ...exerciseLogs
+          .filter(log => String(log.sessionId || '') !== String(sessionId))
           .filter(log => log.exerciseNote || log.note)
           .map(log => ({
             date: log.date,
@@ -139,6 +139,7 @@ export default function ExerciseSession() {
             weight: log.weight,
             reps: log.reps,
             rir: log.rir,
+            timestamp: log.timestamp,
             text: cleanPastNoteText(log.exerciseNote || log.note),
             switchedFrom: log.switchedFrom || '',
             source: 'Workout'
@@ -158,7 +159,11 @@ export default function ExerciseSession() {
 
       const seen = new Set();
       setNoteHistory(notes
-        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .sort((a, b) => {
+          const timeA = Number(a.timestamp) || new Date(a.date).getTime() || 0;
+          const timeB = Number(b.timestamp) || new Date(b.date).getTime() || 0;
+          return timeB - timeA;
+        })
         .filter(item => {
           const key = `${item.date}-${item.text}`;
           if (seen.has(key)) return false;
@@ -168,7 +173,7 @@ export default function ExerciseSession() {
         .slice(0, 8));
     }
     loadReferenceAndNotes();
-  }, [exercise]);
+  }, [exercise, sessionId]);
 
   useEffect(() => {
     if (exercise) {
@@ -376,6 +381,7 @@ export default function ExerciseSession() {
     const nextInfo = isLastSet
       ? { type: 'exercise', exerciseIndex: exIdx + 1, dayId }
       : { type: 'set', setNumber: currentSet + 1, exercise: exercise.name, target: nextTarget };
+    const shouldStartRestTimer = !(currentSession?.source === 'ad_hoc' && isLastSet);
 
     const nextDrafts = { ...(currentSession?.exerciseDrafts || {}) };
     delete nextDrafts[sessionExerciseId];
@@ -392,10 +398,11 @@ export default function ExerciseSession() {
       sessionStart,
       next: nextInfo,
       exercise: { ...exercise, note: exerciseNote.trim() },
-      isLastSet
+      isLastSet,
+      restTimerEndsAt: shouldStartRestTimer ? Date.now() + restDuration * 1000 : null
     });
 
-    if (currentSession?.source === 'ad_hoc' && isLastSet) {
+    if (!shouldStartRestTimer) {
       return;
     }
 

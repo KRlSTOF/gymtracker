@@ -15,18 +15,21 @@
     "cap:copy": "npx cap copy android",
     "cap:update": "npx cap update android",
 
-    "apk:prepare": "npm run build && npm run cap:sync",
+    "apk:prepare": "npm run build -- --mode capacitor && npm run cap:sync",
     "apk:resync": "npm install && npm run apk:prepare",
     "apk:status": "git status",
 
-    "workflow:note": "echo \"Push to GitHub, then download APK from Actions -> Build Android APK -> Artifacts -> gymtracker-debug-apk\"",
+    "workflow:note": "echo \"Push to GitHub, then download APK from Actions -> Build Android APK -> Artifacts -> gymtracker-apk\"",
 
     "deploy": "npm run build && gh-pages -d dist"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.0",
+    "@capacitor/app": "^8.1.1",
     "@capacitor/cli": "^8.4.0",
     "@capacitor/core": "^8.4.0",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/share": "^8.0.1",
     "idb": "^7.1.1",
     "papaparse": "^5.4.1",
     "react": "^18.2.0",

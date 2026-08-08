@@ -1,4 +1,6 @@
 import { useEffect } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import { HashRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext.jsx';
 import Layout from './components/Layout.jsx';
@@ -49,29 +51,19 @@ function CapacitorShell() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const capacitor = window.Capacitor;
-    const statusBar = capacitor?.Plugins?.StatusBar;
-
-    if (!capacitor?.isNativePlatform?.()) return undefined;
-
-    statusBar?.setOverlaysWebView?.({ overlay: false }).catch?.(() => {});
-  }, []);
-
-  useEffect(() => {
-    const capacitor = window.Capacitor;
-    const app = capacitor?.Plugins?.App;
-
-    if (!capacitor?.isNativePlatform?.() || !app?.addListener) return undefined;
+    if (!Capacitor.isNativePlatform()) return undefined;
 
     let listener;
     let isMounted = true;
 
-    app
+    CapacitorApp
       .addListener('backButton', () => {
         if (closeTransientUi()) return;
 
         if (!ROOT_ROUTES.has(location.pathname)) {
           navigate(-1);
+        } else {
+          CapacitorApp.minimizeApp().catch(() => {});
         }
       })
       .then(handle => {

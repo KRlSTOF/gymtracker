@@ -13,6 +13,7 @@ import {
   deleteExercise,
   addLog
 } from '../data/db.js';
+import { exportTextFile } from '../utils/exportFile.js';
 import styles from './SettingsScreen.module.css';
 
 const DEFAULT_SETTINGS = {
@@ -149,16 +150,35 @@ export default function SettingsScreen() {
   }
 
   async function handleExportJSON() {
-    const data = await exportAllData();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    downloadBlob(blob, `gym-tracker-backup-${new Date().toISOString().split('T')[0]}.json`);
+    setExportStatus('Preparing full backup...');
+    try {
+      const data = await exportAllData();
+      const filename = `gym-tracker-backup-${new Date().toISOString().split('T')[0]}.json`;
+      await exportTextFile({
+        data: JSON.stringify(data, null, 2),
+        filename,
+        mimeType: 'application/json'
+      });
+      setExportStatus(`Export ready: ${filename}`);
+    } catch (err) {
+      setExportStatus(`Export failed: ${err.message}`);
+    }
   }
 
   async function handleExportCSV() {
-    const [logs, exs] = await Promise.all([getAllLogs(), getAllExercises()]);
-    const csv = exportAsCSV(logs, exs);
-    const blob = new Blob([csv], { type: 'text/csv' });
-    downloadBlob(blob, `gym-tracker-export-${new Date().toISOString().split('T')[0]}.csv`);
+    setExportStatus('Preparing logs export...');
+    try {
+      const [logs, exs] = await Promise.all([getAllLogs(), getAllExercises()]);
+      const filename = `gym-tracker-export-${new Date().toISOString().split('T')[0]}.csv`;
+      await exportTextFile({
+        data: exportAsCSV(logs, exs),
+        filename,
+        mimeType: 'text/csv;charset=utf-8'
+      });
+      setExportStatus(`Export ready: ${filename}`);
+    } catch (err) {
+      setExportStatus(`Export failed: ${err.message}`);
+    }
   }
 
   async function handleCompletedBlockExport() {
@@ -168,12 +188,17 @@ export default function SettingsScreen() {
       return;
     }
 
-    const logs = await getAllLogs();
-    const csv = exportCompletedBlockAsCSV(block, logs);
-    const safeName = String(block.name || 'training-block').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'training-block';
-    const blob = new Blob([csv], { type: 'text/csv' });
-    downloadBlob(blob, `${safeName}-completed-${new Date().toISOString().split('T')[0]}.csv`);
-    setExportStatus(`Exported ${block.name}. Completed sets are matched to the plan by day, exercise, and set.`);
+    setExportStatus(`Preparing ${block.name}...`);
+    try {
+      const logs = await getAllLogs();
+      const csv = exportCompletedBlockAsCSV(block, logs);
+      const safeName = String(block.name || 'training-block').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'training-block';
+      const filename = `${safeName}-completed-${new Date().toISOString().split('T')[0]}.csv`;
+      await exportTextFile({ data: csv, filename, mimeType: 'text/csv;charset=utf-8' });
+      setExportStatus(`Export ready: ${filename}. Completed sets are matched to the plan by day, exercise, and set.`);
+    } catch (err) {
+      setExportStatus(`Export failed: ${err.message}`);
+    }
   }
 
   async function handleImportBackup(e) {
@@ -196,15 +221,6 @@ export default function SettingsScreen() {
       setImportStatus('Restore failed: ' + err.message);
     }
     e.target.value = '';
-  }
-
-  function downloadBlob(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   function updateSettingDraft(key, value) {

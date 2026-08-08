@@ -28,8 +28,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build React app
-        run: npm run build
+      - name: Build React app for Capacitor
+        run: npm run build -- --mode capacitor
 
       - name: Sync Capacitor Android project
         run: npx cap sync android

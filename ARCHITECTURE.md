@@ -108,8 +108,11 @@ The ordering is data-sensitive. A set must be durably written before UI state tr
 
 - Full JSON backup covers all five stores and is the disaster-recovery format.
 - CSV exports support workout data and completed blocks but are not a complete application backup.
+- Web exports use a browser download; APK exports write a temporary UTF-8 file to Capacitor's cache and open Android's native share/save sheet through the Filesystem and Share plugins.
 - FitNotes CSV imports into `history` and supports reference/analytics use.
 - Block CSV import creates block content and may add missing exercises to the library.
+
+The browser/PWA and APK builds intentionally differ at the service-worker boundary. Normal `npm run build` output includes the PWA service worker. `npm run apk:prepare` builds in Vite's `capacitor` mode, which omits PWA registration and emits a one-time cleanup worker so existing APK installations controlled by an older Workbox cache can unregister it without touching IndexedDB workout data.
 
 Full restore clears and repopulates all stores inside one read-write transaction after validation. Any future stored collection must be included deliberately in both export and restore.
 
@@ -119,13 +122,15 @@ Full restore clears and repopulates all stores inside one read-write transaction
 
 1. checks out `main`;
 2. installs Node 22 dependencies using `npm ci`;
-3. builds the React app;
+3. builds the React app in `capacitor` mode without PWA registration;
 4. syncs the web output into Android;
 5. restores the permanent signing key from GitHub secrets;
 6. builds a signed release APK with Java 21;
 7. uploads `gymtracker-apk` as a workflow artifact.
 
 `android/app/build.gradle` uses `GITHUB_RUN_NUMBER` as `versionCode` and builds `versionName` as `1.0.<run number>`. Package ID plus permanent signing key plus increasing version code allow a new artifact to update the installed app without removing local data. See [APK_UPDATES.md](APK_UPDATES.md).
+
+Capacitor's App plugin owns Android Back events. Nested routes navigate back, transient UI is dismissed first, and Back on a root tab minimizes the activity. Capacitor 8 System Bars supplies corrected edge-to-edge inset variables for older WebViews; CSS consumes those variables before falling back to standard `env(safe-area-inset-*)` values. The Android activity is portrait-only because the workout layouts are designed and tested for portrait use.
 
 ## Architectural direction
 

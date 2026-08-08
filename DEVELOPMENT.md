@@ -25,6 +25,8 @@ npm run build
 npm run preview -- --host 0.0.0.0
 ```
 
+That normal build retains PWA registration for browser testing. Do not copy it directly into Android. `npm run apk:prepare` uses Vite's `capacitor` mode, disables PWA registration in the packaged WebView, emits the legacy service-worker cleanup asset, and then syncs `dist/` into the Android project.
+
 Because no JavaScript test or lint commands are configured yet, `npm run build` is the minimum automated check: it catches module resolution, syntax, JSX, and bundling failures, but it does not prove user flows or persistence behavior.
 
 ## Routine change workflow
@@ -95,6 +97,8 @@ After a successful workflow:
 2. Install it over the current application; do not uninstall first during a normal update test.
 3. Confirm the existing workout history, plans, settings, and active-session behavior remain intact.
 4. Repeat the changed flow on the phone, including background/resume and Android back behavior.
+
+For shell-sensitive behavior, additionally verify that the status and navigation bars do not cover controls, Back dismisses the keyboard and dialogs before navigating, Back on a root tab minimizes the app, rotation remains locked to portrait, and a running rest timer reconciles immediately after backgrounding or locking the phone past its expiry time.
 
 If Android refuses the update, first compare package ID, signing key, and version code. Do not solve an update failure by uninstalling until a current full backup has been exported, because uninstalling removes local app data.
 
